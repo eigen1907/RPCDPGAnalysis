@@ -133,8 +133,10 @@ void RPCPointFromTagProbeProducer::produce(edm::Event& event, const edm::EventSe
     std::vector<math::XYZTLorentzVector> triggerObjectP4s;
     const auto& triggerObjects = triggerEventHandle->getObjects();
     for ( size_t keyIdx = 0; keyIdx < triggerEventHandle->sizeFilters(); ++keyIdx ) {
-      if ( modules.count(triggerEventHandle->filterLabel(keyIdx)) == 0 ) continue;
-
+      const auto filterLabelView = triggerEventHandle->filterLabel(keyIdx);
+      const std::string filterLabelString(filterLabelView.begin(), filterLabelView.end());
+      
+      if ( modules.count(filterLabelString) == 0 ) continue;
       for ( auto objIdx : triggerEventHandle->filterKeys(keyIdx) ) {
         triggerObjectP4s.push_back(triggerObjects[objIdx].particle().p4());
       }

@@ -152,7 +152,9 @@ void RPCTrackerMuonProbeProducer::produce(edm::Event& event, const edm::EventSet
     
     const auto& triggerObjects = triggerEventHandle->getObjects();
     for ( size_t keyIdx = 0; keyIdx < triggerEventHandle->sizeFilters(); ++keyIdx ) {
-      if ( modules.count(triggerEventHandle->filterLabel(keyIdx)) == 0 ) continue;
+      const auto filterLabelView = triggerEventHandle->filterLabel(keyIdx);
+      const std::string filterLabelString(filterLabelView.begin(), filterLabelView.end());
+      if ( modules.count(filterLabelString) == 0 ) continue;
 
       for ( auto objIdx : triggerEventHandle->filterKeys(keyIdx) ) {
         //if ( std::abs(triggerObjects[objIdx].id()) != 13 ) continue;
