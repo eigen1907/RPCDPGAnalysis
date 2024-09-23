@@ -26,14 +26,14 @@ def submit(config: CrabConfig,
     # /PrimaryDataset/ProcessedDataset/DataTier
     _, primary, processed, _ = input_dataset.split('/')
     pset_stem = Path(config.JobType.psetName).stem
-    now = datetime.now().strftime('%y%m%d-%M%H%S')
+    #now = datetime.now().strftime('%y%m%d-%H%M%S')
 
     config.Data.inputDataset = input_dataset
     if lumi_mask is not None:
         config.Data.lumiMask = lumi_mask
-    config.Data.outLFNDirBase = f'/store/user/{user}/rpc/{name}/{now}'
-    config.General.requestName = f'{pset_stem}__{primary}__{processed}__{now}'
-    config.Data.outputDatasetTag = f'{pset_stem}__{primary}__{processed}'
+    config.Data.outLFNDirBase = f'/store/user/{user}/{name}'
+    config.Data.outputDatasetTag = f'{processed}_{pset_stem}'
+    config.General.requestName = f'{primary}_{processed}_{pset_stem}'
 
     try:
         print(f"Submitting for {input_dataset=}")
@@ -64,10 +64,11 @@ def run(pset: Path,
     # Data
     config.Data.publication  = False
     config.Data.allowNonValidInputDataset = True
-    config.Data.splitting = 'LumiBased'
-    config.Data.unitsPerJob = 100
+    config.Data.splitting = 'FileBased'
+    config.Data.unitsPerJob = 10
     # Site
     config.Site.storageSite = storage_site
+    #config.Site.blacklist = ['T1_DE_KIT']
 
     for item in input_list:
         submit(config=config, input_dataset=item['input_dataset'],
@@ -85,7 +86,7 @@ def main():
                         type=str, help='storage site name')
     parser.add_argument('-u', '--user', default=getpass.getuser(), type=str,
                         help='lxplus user id')
-    parser.add_argument('-n', '--name', default='tnp-nanoaod', type=str,
+    parser.add_argument('-n', '--name', default='RPC-TnP-NanoAOD', type=str,
                         help='project name')
     args = parser.parse_args()
 

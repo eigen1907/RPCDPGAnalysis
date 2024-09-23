@@ -22,7 +22,16 @@ process.GlobalTag.globaltag = autoCond['run3_data']
 
 process.source = cms.Source('PoolSource',
     fileNames = cms.untracked.vstring(options.inputFiles),
-    secondaryFileNames = cms.untracked.vstring()
+    secondaryFileNames = cms.untracked.vstring(),
+    inputCommands=cms.untracked.vstring(
+        'keep *',
+        ### For 2022, 2023 Data
+        'drop TotemFEDInfos_totemT2Digis_TotemT2_RECO',
+        'drop TotemT2DigiedmNewDetSetVector_totemT2Digis_TotemT2_RECO',
+        'drop TotemVFATStatusedmDetSetVector_totemT2Digis_TotemT2_RECO',
+        ### For 2024 Data
+        'drop floatBXVector_gtStage2Digis_CICADAScore_RECO',
+    )
 )
 
 process.muRPCTnPFlatTableProducer.tagMuonTriggerMatchingPaths = [

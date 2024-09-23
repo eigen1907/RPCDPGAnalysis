@@ -1,0 +1,20 @@
+[
+    {
+        "input_dataset": "/Muon0/Run2023B-PromptReco-v1/AOD"
+    },
+    {
+        "input_dataset": "/Muon0/Run2023C-PromptReco-v4/AOD"
+    },
+    {
+        "input_dataset": "/Muon0/Run2023D-PromptReco-v2/AOD"
+    },
+    {
+        "input_dataset": "/Muon1/Run2023B-PromptReco-v1/AOD"
+    },
+    {
+        "input_dataset": "/Muon1/Run2023C-PromptReco-v4/AOD"
+    },
+    {
+        "input_dataset": "/Muon1/Run2023D-PromptReco-v2/AOD"
+    }
+]

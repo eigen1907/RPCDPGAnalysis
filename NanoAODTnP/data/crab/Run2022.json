@@ -1,0 +1,24 @@
+[
+    {
+        "input_dataset": "/SingleMuon/Run2022B-27Jun2023-v1/AOD"
+    },
+    {
+        "input_dataset": "/SingleMuon/Run2022C-27Jun2023-v1/AOD"
+    },
+    {
+        "input_dataset": "/Muon/Run2022C-27Jun2023-v1/AOD"
+    },
+    {
+        "input_dataset": "/Muon/Run2022D-27Jun2023-v2/AOD"
+    },
+    {
+        "input_dataset": "/Muon/Run2022E-27Jun2023-v1/AOD"
+    },
+    {
+        "input_dataset": "/Muon/Run2022F-PromptReco-v1/AOD"
+    },
+    {
+        "input_dataset": "/Muon/Run2022G-PromptReco-v1/AOD"
+    }
+]
+  
