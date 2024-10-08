@@ -32,7 +32,7 @@ def submit(config: CrabConfig,
     if lumi_mask is not None:
         config.Data.lumiMask = lumi_mask
     config.Data.outLFNDirBase = f'/store/user/{user}/{name}'
-    config.Data.outputDatasetTag = f'{processed}_{pset_stem}'
+    config.Data.outputDatasetTag = f'{processed}/{pset_stem}'
     config.General.requestName = f'{primary}_{processed}_{pset_stem}'
 
     try:
