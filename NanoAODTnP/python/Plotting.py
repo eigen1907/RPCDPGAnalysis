@@ -173,3 +173,5 @@ def plot_eff_detector(input_path: Path,
             output_path=output_path,
             close=True
         )
+
+

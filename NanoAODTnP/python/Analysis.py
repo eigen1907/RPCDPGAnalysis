@@ -10,6 +10,7 @@ import uproot
 import pandas as pd
 from hist.hist import Hist
 from hist.axis import StrCategory, IntCategory
+from concurrent.futures import ThreadPoolExecutor
 from RPCDPGAnalysis.NanoAODTnP.RPCGeomServ import get_roll_name
 
 
@@ -100,6 +101,7 @@ def get_roll_mask(roll_name: np.ndarray,
     roll_mask = np.vectorize(lambda roll: roll not in masked_rolls)(roll_name)
     return roll_mask
 
+
 def get_run_mask(runs: np.ndarray,
                  run_mask_path: Path,      
 ):
@@ -110,6 +112,7 @@ def get_run_mask(runs: np.ndarray,
 
     run_mask = np.vectorize(lambda run: run not in masked_runs)(runs)
     return run_mask
+
 
 def read_nanoaod_by_hit(path,
                         cert_path: Path,
@@ -147,6 +150,7 @@ def read_nanoaod_by_hit(path,
     hit_tree['luminosityBlock'] = np.repeat(lumi_block[lumi_mask], size[lumi_mask])
     hit_tree['event'] = np.repeat(event[lumi_mask], size[lumi_mask])
     return hit_tree
+
 
 def read_nanoaod_by_muon(path,
                          cert_path: Path,
@@ -189,6 +193,7 @@ def read_nanoaod_by_muon(path,
         muon_tree[muon_key] = muon_var
     
     return muon_tree
+
 
 def flatten_nanoaod(input_path: Path,
                     cert_path: Path,
@@ -238,8 +243,11 @@ def flatten_nanoaod(input_path: Path,
 
     run = np.unique(hit_tree['run'])
     run_axis = IntCategory(run.tolist())
+
+    ls = np.unique(hit_tree['luminosityBlock'])
+    ls_axis = IntCategory(ls.tolist())
     
-    h_total_by_roll = Hist(roll_axis) # type: ignore
+    h_total_by_roll = Hist(roll_axis)
     h_passed_by_roll = h_total_by_roll.copy()
     h_total_by_roll.fill(hit_tree['roll_name'][hit_tree['is_fiducial']])
     h_passed_by_roll.fill(hit_tree['roll_name'][hit_tree['is_fiducial'] & hit_tree['is_matched']])
@@ -255,6 +263,12 @@ def flatten_nanoaod(input_path: Path,
     h_passed_by_roll_run.fill(hit_tree['roll_name'][hit_tree['is_fiducial'] & hit_tree['is_matched']], 
                               hit_tree['run'][hit_tree['is_fiducial'] & hit_tree['is_matched']])
 
+    h_total_by_run_ls = Hist(run_axis, ls_axis)
+    h_passed_by_run_ls = Hist(run_axis, ls_axis)
+    h_total_by_run_ls.fill(hit_tree['run'][hit_tree['is_fiducial']], hit_tree['luminosityBlock'][hit_tree['is_fiducial']])
+    h_passed_by_run_ls.fill(hit_tree['run'][hit_tree['is_fiducial'] & hit_tree['is_matched']], 
+                            hit_tree['luminosityBlock'][hit_tree['is_fiducial'] & hit_tree['is_matched']])
+
     roll_name = hit_tree.pop('roll_name')
     
     hit_tree = ak.Array(hit_tree)
@@ -269,11 +283,31 @@ def flatten_nanoaod(input_path: Path,
         output_file['passed_by_run'] = h_passed_by_run
         output_file['total_by_roll_run'] = h_total_by_roll_run
         output_file['passed_by_roll_run'] = h_passed_by_roll_run
+        output_file['total_by_run_ls'] = h_total_by_run_ls
+        output_file['passed_by_run_ls'] = h_passed_by_run_ls
+
+
+def safe_tree_arrays(tree, library="ak"):
+    try:
+        return tree.arrays(library=library)
+    except IndexError:
+        print(f"Skipping empty or corrupt tree: {tree.name}")
+        return ak.Array([])
 
 def merge_trees(tree_list):
-    arrays = [tree.arrays(library="ak") for tree in tree_list]
+    if len(tree_list) == 0:
+        return ak.Array([])
+
+    with ThreadPoolExecutor() as executor:
+        arrays = list(executor.map(safe_tree_arrays, tree_list))
+
+    arrays = [arr for arr in arrays if len(arr) > 0]
+    if len(arrays) == 0:
+        return ak.Array([])
+
     merged_tree = ak.concatenate(arrays, axis=0)
     return merged_tree
+
 
 def merge_histograms(hist_list):
     n_axes = len(hist_list[0].axes)
@@ -306,46 +340,33 @@ def merge_histograms(hist_list):
             raise ValueError("Only 1D and 2D histograms are supported.")
     return combined_hist
 
+
 def merge_flat_nanoaod_files(input_paths: Path,
-                             output_path: Path,
-):
-    hit_tree_list = []
-    muon_tree_list = []
-    h_total_by_roll_list = []
-    h_passed_by_roll_list = []
-    h_total_by_run_list = []
-    h_passed_by_run_list = []
-    h_total_by_roll_run_list = []
-    h_passed_by_roll_run_list = []
+                             output_path: Path):
+    tree_lists = {}
+    hist_lists = {}
+
+    with uproot.open(input_paths[0]) as f:
+        for key in f.keys():
+            if f[key].classname.startswith("TTree"):
+                tree_lists[key] = []
+            elif f[key].classname.startswith("TH"):
+                hist_lists[key] = []
 
     for input_path in input_paths:
         with uproot.open(input_path) as f:
-            hit_tree_list.append(f["hit_tree"])
-            muon_tree_list.append(f["muon_tree"])
-            h_total_by_roll_list.append(f["total_by_roll"].to_hist())
-            h_passed_by_roll_list.append(f["passed_by_roll"].to_hist())
-            h_total_by_run_list.append(f["total_by_run"].to_hist())
-            h_passed_by_run_list.append(f["passed_by_run"].to_hist())
-            h_total_by_roll_run_list.append(f["total_by_roll_run"].to_hist())
-            h_passed_by_roll_run_list.append(f["passed_by_roll_run"].to_hist())
-    
-    merged_hit_tree = merge_trees(hit_tree_list)
-    merged_muon_tree = merge_trees(muon_tree_list)
-    
-    merged_h_total_by_roll = merge_histograms(h_total_by_roll_list)
-    merged_h_passed_by_roll = merge_histograms(h_passed_by_roll_list)
-    merged_h_total_by_run = merge_histograms(h_total_by_run_list)
-    merged_h_passed_by_run = merge_histograms(h_passed_by_run_list)
-    merged_h_total_by_roll_run = merge_histograms(h_total_by_roll_run_list)
-    merged_h_passed_by_roll_run = merge_histograms(h_passed_by_roll_run_list)
+            for tree_name in tree_lists:
+                tree_lists[tree_name].append(f[tree_name])
+            for hist_name in hist_lists:
+                hist_lists[hist_name].append(f[hist_name].to_hist())
+
+    merged_trees = {name: merge_trees(tree_list) for name, tree_list in tree_lists.items()}
+    merged_hists = {name: merge_histograms(hist_list) for name, hist_list in hist_lists.items()}
 
     with uproot.recreate(output_path) as output_file:
-        output_file["hit_tree"] = merged_hit_tree
-        output_file["muon_tree"] = merged_muon_tree
-        
-        output_file["total_by_roll"] = merged_h_total_by_roll
-        output_file["passed_by_roll"] = merged_h_passed_by_roll
-        output_file["total_by_run"] = merged_h_total_by_run
-        output_file["passed_by_run"] = merged_h_passed_by_run
-        output_file["total_by_roll_run"] = merged_h_total_by_roll_run
-        output_file["passed_by_roll_run"] = merged_h_passed_by_roll_run
+        for tree_name, merged_tree in merged_trees.items():
+            output_file[tree_name] = merged_tree
+
+        for hist_name, merged_hist in merged_hists.items():
+            output_file[hist_name] = merged_hist
+
