@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.offsetbox as offsetbox
 import os
 
-path = 'csv/140X_mcRun4_realistic_v3.csv'
+path = 'csv/test.csv'
 geometry = pd.read_csv(path, sep=',', index_col=False)
 
 region_names = ['RE-3', 'RE-4', 'RE+3', 'RE+4']

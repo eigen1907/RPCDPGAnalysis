@@ -68,16 +68,32 @@ void RPCGeometryDumper::beginRun(const edm::Run&, const edm::EventSetup& iSetup)
   {
     const auto detId = roll->id();
     const string rollName = RPCGeomServ(detId).name();
+
     bool isFront = false;
-    if (detId.ring() == 1 && detId.station()) 
-    {
-      isFront = (detId.subsector() != 2);
-      if (detId.sector() % 2 == 0) isFront = !isFront;
-    } 
-    else 
-    {
-      isFront = (detId.subsector() % 2 == 0);
+    
+    if (detId.ring() == 1) {
+      isFront = true;
+    } else if (detId.station() == 1) {
+      isFront = (RPCGeomServ(detId).segment() % 2 == 0);
+    } else {
+      isFront = (RPCGeomServ(detId).segment() % 2 != 0);
     }
+    //if (detId.ring() == 1) {
+    //  isFront = true;
+    //} else {
+    //  // 10 degree rings have odd subsectors in front
+    //  isFront = (detId.subsector() % 2 == 0);
+    //}    
+    
+    //if (detId.ring() == 1 && detId.station()) 
+    //{
+    //  isFront = (detId.subsector() != 2);
+    //  if (detId.sector() % 2 == 0) isFront = !isFront;
+    //} 
+    //else 
+    //{
+    //  isFront = (detId.subsector() % 2 == 0);
+    //}
 
     const auto& bound = roll->surface().bounds();
     const float h = bound.length();
