@@ -25,7 +25,8 @@ process.load('FWCore/MessageService/MessageLogger_cfi')
 ######################################################################################################
 ### From specific xml file at https://github.com/cms-sw/cmssw/tree/master/Configuration/Geometry/python
 ######################################################################################################
-process.load('Configuration.Geometry.GeometryDD4hepExtended2024Reco_cff')
+process.load('Configuration.Geometry.GeometryExtended2024Reco_cff')
+#process.load('Configuration.Geometry.GeometryDD4hepExtended2024Reco_cff')
 
 ######################################################################################################
 ### The source data defines the time zone of the Geometry that the tag will load.
@@ -39,7 +40,7 @@ process.source = cms.Source("PoolSource",
 process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(1) )
 
 process.RPCGeometryDumper = cms.EDAnalyzer("RPCGeometryDumper",
-    outputFileName = cms.untracked.string("rpc_geometry.csv"),
+    outputFileName = cms.untracked.string("/afs/cern.ch/user/j/joshin/public/Geometry/CMSSW_14_2_0_pre3/src/RPCDPGAnalysis/GeometryDumper/data/csv/rpcf_2025_v1.csv"),
 )
 
 process.p = cms.Path(process.RPCGeometryDumper)
