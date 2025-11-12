@@ -25,22 +25,24 @@ process.load('FWCore/MessageService/MessageLogger_cfi')
 ######################################################################################################
 ### From specific xml file at https://github.com/cms-sw/cmssw/tree/master/Configuration/Geometry/python
 ######################################################################################################
-process.load('Configuration.Geometry.GeometryExtended2024Reco_cff')
+process.load('Configuration.Geometry.GeometryExtended2025Reco_cff')
 #process.load('Configuration.Geometry.GeometryDD4hepExtended2024Reco_cff')
+#process.load('Configuration.Geometry.GeometryExtendedRun4D123Reco_cff')
 
 ######################################################################################################
 ### The source data defines the time zone of the Geometry that the tag will load.
 ### Consider the payload of the tag (e.g. https://cms-conddb.cern.ch/cmsDbBrowser/list/Prod/tags/RecoIdealGeometry_RPC_v3_hlt)
 ######################################################################################################
-process.source = cms.Source("PoolSource",
-    #fileNames = cms.untracked.vstring('file:../data/root/sample.root') ## if you want to use local root file
-    fileNames = cms.untracked.vstring('root://cms-xrd-global.cern.ch//store/data/Run2023D/Muon0/AOD/PromptReco-v1/000/370/580/00001/ed65f587-336e-4ca8-a4ed-14dd220c70dc.root')
-)
+process.source = cms.Source("EmptySource")
+process.maxEvents = cms.untracked.PSet(
+    input = cms.untracked.int32(1)
+    )
 
 process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(1) )
 
 process.RPCGeometryDumper = cms.EDAnalyzer("RPCGeometryDumper",
-    outputFileName = cms.untracked.string("/afs/cern.ch/user/j/joshin/public/Geometry/CMSSW_14_2_0_pre3/src/RPCDPGAnalysis/GeometryDumper/data/csv/rpcf_2025_v1.csv"),
+    outputFileName = cms.untracked.string("rpcf_2026_v1.csv"),
+    #outputFileName = cms.untracked.string("rpcf_2030_v6.csv"),
 )
 
 process.p = cms.Path(process.RPCGeometryDumper)
