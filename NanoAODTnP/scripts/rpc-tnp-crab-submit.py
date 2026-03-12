@@ -26,14 +26,12 @@ def submit(config: CrabConfig,
     # /PrimaryDataset/ProcessedDataset/DataTier
     _, primary, processed, _ = input_dataset.split('/')
     pset_stem = Path(config.JobType.psetName).stem
-    #now = datetime.now().strftime('%y%m%d-%H%M%S')
-
     config.Data.inputDataset = input_dataset
     if lumi_mask is not None:
         config.Data.lumiMask = lumi_mask
     config.Data.outLFNDirBase = f'/store/user/{user}/{name}'
-    config.Data.outputDatasetTag = f'{processed}/{pset_stem}'
-    config.General.requestName = f'{primary}_{processed}_{pset_stem}'
+    config.Data.outputDatasetTag = f'{processed}'
+    config.General.requestName = f'{pset_stem}_{primary}_{processed}'
 
     try:
         print(f"Submitting for {input_dataset=}")
@@ -51,6 +49,7 @@ def run(pset: Path,
         user: str,
         storage_site: str,
         name: str,
+        units_per_job: int = 10,
 ):
     """
     """
@@ -65,10 +64,9 @@ def run(pset: Path,
     config.Data.publication  = False
     config.Data.allowNonValidInputDataset = True
     config.Data.splitting = 'FileBased'
-    config.Data.unitsPerJob = 10
+    config.Data.unitsPerJob = units_per_job
     # Site
     config.Site.storageSite = storage_site
-    #config.Site.blacklist = ['T1_DE_KIT']
 
     for item in input_list:
         submit(config=config, input_dataset=item['input_dataset'],
@@ -88,6 +86,8 @@ def main():
                         help='lxplus user id')
     parser.add_argument('-n', '--name', default='RPC-TnP-NanoAOD', type=str,
                         help='project name')
+    parser.add_argument('--units-per-job', default=10, type=int,
+                        help='number of files per job')
     args = parser.parse_args()
 
     if not args.pset.exists():
@@ -104,7 +104,8 @@ def main():
         input_list=input_list,
         user=args.user,
         storage_site=args.storage_site,
-        name=args.name
+        name=args.name,
+        units_per_job=args.units_per_job,
     )
 
 
