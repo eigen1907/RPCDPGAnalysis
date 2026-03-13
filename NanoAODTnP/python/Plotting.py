@@ -1,4 +1,3 @@
-from typing import Optional, Union
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional, Union
@@ -30,16 +29,23 @@ def plot_patches(patches: list[Polygon],
     """
     """
     ax = ax or plt.gca()
+
     if vmin is None:
         vmin = np.nanmin(values)
     if vmax is None:
         vmax = np.nanmax(values)
+
     cmap = plt.get_cmap(cmap)
 
     normalized_values = (values - vmin) / (vmax - vmin)
+    normalized_values = np.clip(normalized_values, 0.0, 1.0)
+    normalized_values = np.nan_to_num(normalized_values, nan=0.0, posinf=1.0, neginf=0.0)
+
     color = cmap(normalized_values)
+
     if mask is not None:
-        color[mask] = np.nan
+        inactive_color = np.array([0.85, 0.85, 0.85, 1.0], dtype=np.float64)
+        color[mask] = inactive_color
 
     collection = PatchCollection(patches)
     collection.set_color(color)
@@ -47,11 +53,10 @@ def plot_patches(patches: list[Polygon],
     collection.set_linewidth(lw)
     ax.add_collection(collection)
 
-    # add colobar
     ax.autoscale_view()
     scalar_mappable = plt.cm.ScalarMappable(
         cmap=cmap,
-        norm=plt.Normalize(vmin=vmin, vmax=vmax) # FIXME
+        norm=plt.Normalize(vmin=vmin, vmax=vmax)
     )
     scalar_mappable.set_array([])
     axes_divider = make_axes_locatable(ax)
@@ -61,26 +66,91 @@ def plot_patches(patches: list[Polygon],
     return ax.figure
 
 
-def plot_eff_detector_unit(h_total,
-                           h_passed,
-                           detector_unit: str,
-                           roll_list: list[RPCRoll],
-                           percentage: bool,
-                           label: str,
-                           year: Union[int, str],
-                           com: float,
-                           output_path: Optional[Path],
-                           close: bool,
+def load_eff_detector(input_path: Path,
+                      geom_path: Path):
+    input_file = uproot.open(input_path)
+
+    branches = [
+        'region', 'ring', 'station', 'sector', 'layer', 'subsector', 'roll',
+        'is_fiducial', 'is_matched',
+    ]
+
+    arrays = input_file['trial_tree'].arrays(branches, library='np')
+
+    trial_df = pd.DataFrame({
+        key: arrays[key]
+        for key in branches
+    })
+
+    geom = pd.read_csv(geom_path)
+
+    key_cols = ['region', 'ring', 'station', 'sector', 'layer', 'subsector', 'roll']
+    geom_key = geom[key_cols + ['roll_name']].drop_duplicates()
+
+    trial_df = trial_df.merge(
+        geom_key,
+        on=key_cols,
+        how='left',
+        validate='many_to_one',
+    )
+
+    missing_mask = trial_df['roll_name'].isna()
+    if missing_mask.any():
+        missing_rows = trial_df.loc[missing_mask, key_cols].drop_duplicates()
+        raise ValueError(
+            'Some trial_tree rows could not be matched to geom.csv.\n'
+            f'Number of unmatched detector keys: {len(missing_rows)}\n'
+            f'Examples:\n{missing_rows.head()}'
+        )
+
+    fiducial_mask = trial_df['is_fiducial'].astype(bool).to_numpy()
+    passed_mask = (
+        trial_df['is_fiducial'].astype(bool).to_numpy()
+        & trial_df['is_matched'].astype(bool).to_numpy()
+    )
+
+    total_by_roll = (
+        trial_df.loc[fiducial_mask]
+        .groupby('roll_name')
+        .size()
+        .astype(np.int64)
+    )
+
+    passed_by_roll = (
+        trial_df.loc[passed_mask]
+        .groupby('roll_name')
+        .size()
+        .astype(np.int64)
+    )
+
+    return total_by_roll, passed_by_roll
+
+
+def plot_eff_roll(total_by_roll: pd.Series,
+                  passed_by_roll: pd.Series,
+                  detector_unit: str,
+                  roll_list: list[RPCRoll],
+                  percentage: bool,
+                  label: str,
+                  year: Union[int, str],
+                  com: float,
+                  output_path: Optional[Path],
+                  close: bool,
 ):
     """
     plot eff
     """
     name_list = [each.id.name for each in roll_list]
 
-    total = h_total[name_list].values() # type: ignore
-    passed = h_passed[name_list].values() # type: ignore
-    eff = np.divide(passed, total, out=np.zeros_like(total),
-                    where=(total > 0))
+    total = total_by_roll.reindex(name_list, fill_value=0).to_numpy(dtype=np.float64)
+    passed = passed_by_roll.reindex(name_list, fill_value=0).to_numpy(dtype=np.float64)
+
+    eff = np.divide(
+        passed,
+        total,
+        out=np.zeros_like(total, dtype=np.float64),
+        where=(total > 0),
+    )
 
     patches = [each.polygon for each in roll_list]
     values = 100 * eff if percentage else eff
@@ -95,7 +165,7 @@ def plot_eff_detector_unit(h_total,
         mask=inactive_roll_mask,
         vmin=vmin,
         vmax=vmax,
-        ax=ax
+        ax=ax,
     )
     _, cax = fig.get_axes()
 
@@ -103,21 +173,25 @@ def plot_eff_detector_unit(h_total,
     ylabel = roll_list[0].polygon_ylabel
     ymax = roll_list[0].polygon_ymax
 
-    ax.set_xlabel(xlabel) # type: ignore
-    ax.set_ylabel(ylabel) # type: ignore
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
 
     cax_ylabel = 'Efficiency'
     if percentage:
         cax_ylabel += ' [%]'
     cax.set_ylabel(cax_ylabel)
     cax.set_ylim(vmin, vmax)
-    ax.set_ylim(None, ymax) # type: ignore
-    ax.annotate(detector_unit, (0.05, 0.925), weight='bold',
-                xycoords='axes fraction') # type: ignore
+    ax.set_ylim(None, ymax)
+    ax.annotate(
+        detector_unit,
+        (0.05, 0.925),
+        weight='bold',
+        xycoords='axes fraction',
+    )
     mh.cms.label(ax=ax, llabel=label, com=com, year=year)
 
     if output_path is not None:
-        for suffix in ['.png', '.pdf']:
+        for suffix in ['.pdf']:
             fig.savefig(output_path.with_suffix(suffix))
 
     if close:
@@ -135,21 +209,23 @@ def plot_eff_detector(input_path: Path,
                       percentage: bool = True,
                       roll_blacklist_path: Optional[Path] = None,
 ):
-    input_file = uproot.open(input_path)
-
     if roll_blacklist_path is None:
         roll_blacklist = set()
     else:
         with open(roll_blacklist_path) as stream:
             roll_blacklist = set(json.load(stream))
 
-    h_total: Hist = input_file['total'].to_hist() # type: ignore
-    h_passed: Hist = input_file['passed'].to_hist() # type: ignore
+    total_by_roll, passed_by_roll = load_eff_detector(
+        input_path=input_path,
+        geom_path=geom_path,
+    )
 
     geom = pd.read_csv(geom_path)
-    roll_list = [RPCRoll.from_row(row)
-                 for _, row in geom.iterrows()
-                 if row.roll_name not in roll_blacklist]
+    roll_list = [
+        RPCRoll.from_row(row)
+        for _, row in geom.iterrows()
+        if row.roll_name not in roll_blacklist
+    ]
 
     if not output_dir.exists():
         output_dir.mkdir(parents=True)
@@ -159,19 +235,19 @@ def plot_eff_detector(input_path: Path,
     for roll in roll_list:
         unit_to_rolls[roll.id.detector_unit].append(roll)
 
-    for detector_unit, roll_list in unit_to_rolls.items():
+    for detector_unit, unit_roll_list in unit_to_rolls.items():
         output_path = output_dir / detector_unit
-        plot_eff_detector_unit(
-            h_total,
-            h_passed,
+        plot_eff_roll(
+            total_by_roll=total_by_roll,
+            passed_by_roll=passed_by_roll,
             detector_unit=detector_unit,
-            roll_list=roll_list,
+            roll_list=unit_roll_list,
             percentage=percentage,
             label=label,
             year=year,
             com=com,
             output_path=output_path,
-            close=True
+            close=True,
         )
 
 

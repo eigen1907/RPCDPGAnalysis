@@ -19,12 +19,12 @@ def main():
                         help='root file created by rpc-tnp-flatten-nanoaod.py')
     parser.add_argument('-g', '--geom-path', required=True, type=Path,
                         help='csv file containing RPC roll information')
-    parser.add_argument('-o', '--output-dir', default=Path.cwd(), type=Path,
-                        help='output directory')
     parser.add_argument('-s', '--com', required=True, type=float,
                         help='centre-of-mass energy (e.g. 13.6)')
     parser.add_argument('-y', '--year', required=True, type=str,
                         help='year (e.g. 2023 or 2023D)')
+    parser.add_argument('-o', '--output-dir', default=Path.cwd(), type=Path, 
+                        help='output directory')
     parser.add_argument('--percentage', action=argparse.BooleanOptionalAction,
                         default=True,
                         help='express efficiency as a percentage')
