@@ -7,11 +7,6 @@ import numpy.typing as npt
 from dataclasses import dataclass
 import awkward as ak
 import uproot
-import pandas as pd
-from hist.hist import Hist
-from hist.axis import StrCategory, IntCategory
-from concurrent.futures import ThreadPoolExecutor
-from RPCDPGAnalysis.NanoAODTnP.RPCGeomServ import get_roll_name
 
 
 @dataclass
@@ -90,56 +85,12 @@ class LumiBlockChecker:
         return mask
 
 
-def get_roll_mask(roll_name: np.ndarray, roll_mask_path: Path):
-    if roll_mask_path is None:
-        masked_rolls = set()
-    with open(roll_mask_path) as stream:
-        masked_rolls = set(json.load(stream))
-
-    roll_mask = np.vectorize(lambda roll: roll not in masked_rolls)(roll_name)
-    return roll_mask
-
-
-def get_run_mask(runs: np.ndarray, run_mask_path: Path):
-    if run_mask_path is None:
-        masked_runs = set()
-    with open(run_mask_path) as stream:
-        masked_runs = set((json.load(stream)))
-
-    run_mask = np.vectorize(lambda run: run not in masked_runs)(runs)
-    return run_mask
-
-
-def read_nanoaod_by_hit(path,
-                        cert_path: Path,
-                        treepath: str = 'Events',
-                        name: str = 'rpcTnP',
+def read_nanoaod_by_trial(path,
+                          cert_path: Path,
+                          treepath: str = 'Events',
+                          name: str = 'rpcTnP',
 ):
     tree = uproot.open(f'{path}:{treepath}')
-
-    aliases = {key.removeprefix(f'{name}_'): key
-               for key in tree.keys()
-               if key.startswith(name)}
-    aliases['size'] = f'n{name}'
-    expressions = list(aliases.keys()) + ['run', 'luminosityBlock', 'event']
-    cut = f'(n{name} > 0)'
-
-    hit_tree: dict[str, np.ndarray] = tree.arrays(
-        expressions=expressions,
-        aliases=aliases,
-        cut=cut,
-        library='np'
-    )
-
-    run = np.asarray(hit_tree.pop('run'), dtype=np.uint32)
-    lumi_block = np.asarray(hit_tree.pop('luminosityBlock'), dtype=np.uint32)
-    event = np.asarray(hit_tree.pop('event'), dtype=np.uint64)
-    size = np.asarray(hit_tree.pop('size'), dtype=np.int32)
-
-    lumi_block_checker = LumiBlockChecker.from_json(cert_path)
-    lumi_mask = lumi_block_checker.get_lumi_mask(run, lumi_block)
-
-    hit_tree = {key: value[lumi_mask] for key, value in hit_tree.items()}
 
     float_keys = {
         'tag_pt', 'tag_eta', 'tag_phi',
@@ -157,257 +108,229 @@ def read_nanoaod_by_hit(path,
         'is_fiducial', 'is_matched',
     }
 
-    flat_hit_tree = {}
-    for key, value in hit_tree.items():
-        flat_value = np.concatenate(value) if len(value) > 0 else np.array([])
-        if key in float_keys:
-            flat_hit_tree[key] = np.asarray(flat_value, dtype=np.float64)
-        elif key in int_keys:
-            flat_hit_tree[key] = np.asarray(flat_value, dtype=np.int32)
-        elif key in bool_keys:
-            flat_hit_tree[key] = np.asarray(flat_value, dtype=np.bool_)
-        else:
-            flat_hit_tree[key] = np.asarray(flat_value)
+    optional_event_keys = [
+        key for key in ('bunchCrossing', 'orbitNumber')
+        if key in tree.keys()
+    ]
 
-    flat_hit_tree['run'] = np.asarray(np.repeat(run[lumi_mask], size[lumi_mask]), dtype=np.uint32)
-    flat_hit_tree['luminosityBlock'] = np.asarray(np.repeat(lumi_block[lumi_mask], size[lumi_mask]), dtype=np.uint32)
-    flat_hit_tree['event'] = np.asarray(np.repeat(event[lumi_mask], size[lumi_mask]), dtype=np.uint64)
-
-    return flat_hit_tree
-
-
-def read_nanoaod_by_muon(path,
-                         cert_path: Path,
-                         treepath: str = 'Events',
-                         name: str = 'rpcTnP',
-):
-    tree = uproot.open(f'{path}:{treepath}')
-
-    muon_keys = ['tag_pt', 'tag_eta', 'tag_phi',
-                 'probe_pt', 'probe_eta', 'probe_phi',
-                 'probe_time', 'probe_dxdz', 'probe_dydz',
-                 'dimuon_pt', 'dimuon_mass']
-
-    aliases = {key.removeprefix(f'{name}_'): key
-               for key in tree.keys()
-               if (key.startswith(name) and key.removeprefix(f'{name}_') in muon_keys)}
+    aliases = {
+        key.removeprefix(f'{name}_'): key
+        for key in tree.keys()
+        if key.startswith(name)
+    }
     aliases['size'] = f'n{name}'
-    expressions = list(aliases.keys()) + ['run', 'luminosityBlock', 'event']
+
+    expressions = list(aliases.keys()) + ['run', 'luminosityBlock', 'event'] + optional_event_keys
     cut = f'(n{name} > 0)'
 
-    muon_tree: dict[str, np.ndarray] = tree.arrays(
+    trial_tree: dict[str, np.ndarray] = tree.arrays(
         expressions=expressions,
         aliases=aliases,
         cut=cut,
         library='np'
     )
 
-    run = np.asarray(muon_tree.pop('run'), dtype=np.uint32)
-    lumi_block = np.asarray(muon_tree.pop('luminosityBlock'), dtype=np.uint32)
-    event = np.asarray(muon_tree.pop('event'), dtype=np.uint64)
-    size = np.asarray(muon_tree.pop('size'), dtype=np.int32)
+    run = np.asarray(trial_tree.pop('run'), dtype=np.uint32)
+    lumi_block = np.asarray(trial_tree.pop('luminosityBlock'), dtype=np.uint32)
+    event = np.asarray(trial_tree.pop('event'), dtype=np.uint64)
+    size = np.asarray(trial_tree.pop('size'), dtype=np.int32)
+
+    optional_event_arrays = {
+        key: np.asarray(trial_tree.pop(key))
+        for key in optional_event_keys
+    }
 
     lumi_block_checker = LumiBlockChecker.from_json(cert_path)
     lumi_mask = lumi_block_checker.get_lumi_mask(run, lumi_block)
 
-    muon_tree = {key: value[lumi_mask] for key, value in muon_tree.items()}
+    run = run[lumi_mask]
+    lumi_block = lumi_block[lumi_mask]
+    event = event[lumi_mask]
+    size = size[lumi_mask]
 
-    flat_muon_tree = {}
-    for muon_key in muon_keys:
-        arr = muon_tree[muon_key]
-        scalar_arr = np.array([x[0] for x in arr], dtype=np.float64)
-        flat_muon_tree[muon_key] = scalar_arr
+    optional_event_arrays = {
+        key: value[lumi_mask]
+        for key, value in optional_event_arrays.items()
+    }
 
-    flat_muon_tree['run'] = np.asarray(run[lumi_mask], dtype=np.uint32)
-    flat_muon_tree['luminosityBlock'] = np.asarray(lumi_block[lumi_mask], dtype=np.uint32)
-    flat_muon_tree['event'] = np.asarray(event[lumi_mask], dtype=np.uint64)
-    flat_muon_tree['size'] = np.asarray(size[lumi_mask], dtype=np.int32)
+    trial_tree = {
+        key: value[lumi_mask]
+        for key, value in trial_tree.items()
+    }
 
-    return flat_muon_tree
+    flat_trial_tree = {}
+    for key, value in trial_tree.items():
+        flat_value = np.concatenate(value) if len(value) > 0 else np.array([])
+
+        if key in float_keys:
+            flat_trial_tree[key] = np.asarray(flat_value, dtype=np.float64)
+        elif key in int_keys:
+            flat_trial_tree[key] = np.asarray(flat_value, dtype=np.int32)
+        elif key in bool_keys:
+            flat_trial_tree[key] = np.asarray(flat_value, dtype=np.bool_)
+        else:
+            flat_trial_tree[key] = np.asarray(flat_value)
+
+    total_size = int(np.sum(size, dtype=np.int64))
+
+    if total_size > 0:
+        flat_trial_tree['run'] = np.asarray(np.repeat(run, size), dtype=np.uint32)
+        flat_trial_tree['luminosityBlock'] = np.asarray(np.repeat(lumi_block, size), dtype=np.uint32)
+        flat_trial_tree['event'] = np.asarray(np.repeat(event, size), dtype=np.uint64)
+
+        for key, value in optional_event_arrays.items():
+            flat_trial_tree[key] = np.asarray(np.repeat(value, size), dtype=value.dtype)
+
+        flat_trial_tree['pair_index'] = np.zeros(total_size, dtype=np.int32)
+        flat_trial_tree['nrpcTnP'] = np.asarray(np.repeat(size, size), dtype=np.int32)
+
+        trial_index = []
+        for n in size:
+            n = int(n)
+            if n > 0:
+                trial_index.append(np.arange(n, dtype=np.int32))
+
+        flat_trial_tree['trial_index'] = (
+            np.concatenate(trial_index)
+            if len(trial_index) > 0 else np.array([], dtype=np.int32)
+        )
+    else:
+        flat_trial_tree['run'] = np.array([], dtype=np.uint32)
+        flat_trial_tree['luminosityBlock'] = np.array([], dtype=np.uint32)
+        flat_trial_tree['event'] = np.array([], dtype=np.uint64)
+
+        for key in optional_event_keys:
+            flat_trial_tree[key] = np.array([], dtype=optional_event_arrays[key].dtype)
+
+        flat_trial_tree['pair_index'] = np.array([], dtype=np.int32)
+        flat_trial_tree['nrpcTnP'] = np.array([], dtype=np.int32)
+        flat_trial_tree['trial_index'] = np.array([], dtype=np.int32)
+
+    return flat_trial_tree
+
+
+def read_nanoaod_by_pair(path,
+                         cert_path: Path,
+                         treepath: str = 'Events',
+                         name: str = 'rpcTnP',
+):
+    tree = uproot.open(f'{path}:{treepath}')
+
+    pair_keys = [
+        'tag_pt', 'tag_eta', 'tag_phi',
+        'probe_pt', 'probe_eta', 'probe_phi',
+        'probe_time',
+        'dimuon_pt', 'dimuon_mass',
+    ]
+
+    optional_event_keys = [
+        key for key in ('bunchCrossing', 'orbitNumber')
+        if key in tree.keys()
+    ]
+
+    aliases = {
+        key.removeprefix(f'{name}_'): key
+        for key in tree.keys()
+        if key.startswith(name) and key.removeprefix(f'{name}_') in pair_keys
+    }
+    aliases['size'] = f'n{name}'
+
+    expressions = list(aliases.keys()) + ['run', 'luminosityBlock', 'event'] + optional_event_keys
+    cut = f'(n{name} > 0)'
+
+    pair_tree: dict[str, np.ndarray] = tree.arrays(
+        expressions=expressions,
+        aliases=aliases,
+        cut=cut,
+        library='np'
+    )
+
+    run = np.asarray(pair_tree.pop('run'), dtype=np.uint32)
+    lumi_block = np.asarray(pair_tree.pop('luminosityBlock'), dtype=np.uint32)
+    event = np.asarray(pair_tree.pop('event'), dtype=np.uint64)
+    size = np.asarray(pair_tree.pop('size'), dtype=np.int32)
+
+    optional_event_arrays = {
+        key: np.asarray(pair_tree.pop(key))
+        for key in optional_event_keys
+    }
+
+    lumi_block_checker = LumiBlockChecker.from_json(cert_path)
+    lumi_mask = lumi_block_checker.get_lumi_mask(run, lumi_block)
+
+    run = run[lumi_mask]
+    lumi_block = lumi_block[lumi_mask]
+    event = event[lumi_mask]
+    size = size[lumi_mask]
+
+    optional_event_arrays = {
+        key: value[lumi_mask]
+        for key, value in optional_event_arrays.items()
+    }
+
+    filtered_pair_tree = {
+        key: value[lumi_mask]
+        for key, value in pair_tree.items()
+    }
+
+    flat_pair_tree = {}
+    for key in pair_keys:
+        arr = filtered_pair_tree[key]
+        flat_pair_tree[key] = (
+            np.asarray([x[0] for x in arr], dtype=np.float64)
+            if len(arr) > 0 else np.array([], dtype=np.float64)
+        )
+
+    flat_pair_tree['run'] = np.asarray(run, dtype=np.uint32)
+    flat_pair_tree['luminosityBlock'] = np.asarray(lumi_block, dtype=np.uint32)
+    flat_pair_tree['event'] = np.asarray(event, dtype=np.uint64)
+
+    for key, value in optional_event_arrays.items():
+        flat_pair_tree[key] = np.asarray(value, dtype=value.dtype)
+
+    flat_pair_tree['pair_index'] = np.zeros(len(run), dtype=np.int32)
+    flat_pair_tree['nrpcTnP'] = np.asarray(size, dtype=np.int32)
+
+    return flat_pair_tree
 
 
 def flatten_nanoaod(input_path: Path,
                     cert_path: Path,
-                    geom_path: Path,
                     output_path: Path,
-                    roll_mask_path: Path = None,
-                    run_mask_path: Path = None,
                     name: str = 'rpcTnP',
 ):
-    hit_tree = read_nanoaod_by_hit(
+    trial_tree = read_nanoaod_by_trial(
         path=input_path,
         cert_path=cert_path,
         treepath='Events',
-        name=name
+        name=name,
     )
 
-    hit_tree['roll_name'] = np.array([
-        get_roll_name(hit_tree['region'][i], hit_tree['ring'][i], hit_tree['station'][i],
-                      hit_tree['sector'][i], hit_tree['layer'][i], hit_tree['subsector'][i],
-                      hit_tree['roll'][i]) for i in range(len(hit_tree['region']))
-    ], dtype=str)
-
-    mask = np.vectorize(
-        lambda roll: roll in {"RE+4_R1_CH15_A", "RE+4_R1_CH16_A", "RE+3_R1_CH15_A", "RE+3_R1_CH16_A"}
-    )(hit_tree['roll_name'])
-
-    if run_mask_path is not None:
-        mask = mask | get_run_mask(
-            runs=hit_tree['run'],
-            run_mask_path=run_mask_path,
-        )
-
-    if roll_mask_path is not None:
-        mask = mask | get_roll_mask(
-            roll_name=hit_tree['roll_name'],
-            roll_mask_path=roll_mask_path,
-        )
-
-    hit_tree = {key: value[~mask] for key, value in hit_tree.items()}
-
-    muon_tree = read_nanoaod_by_muon(
+    pair_tree = read_nanoaod_by_pair(
         path=input_path,
         cert_path=cert_path,
         treepath='Events',
-        name=name
+        name=name,
     )
 
-    geom = pd.read_csv(geom_path)
-    roll_axis = StrCategory(geom['roll_name'].tolist())
-
-    run = np.unique(hit_tree['run']).astype(np.int64)
-    run_axis = IntCategory(run.tolist())
-
-    ls = np.unique(hit_tree['luminosityBlock']).astype(np.int64)
-    ls_axis = IntCategory(ls.tolist())
-
-    h_total_by_roll = Hist(roll_axis)
-    h_passed_by_roll = h_total_by_roll.copy()
-    h_total_by_roll.fill(hit_tree['roll_name'][hit_tree['is_fiducial']])
-    h_passed_by_roll.fill(hit_tree['roll_name'][hit_tree['is_fiducial'] & hit_tree['is_matched']])
-
-    h_total_by_run = Hist(run_axis)
-    h_passed_by_run = h_total_by_run.copy()
-    h_total_by_run.fill(hit_tree['run'][hit_tree['is_fiducial']].astype(np.int64))
-    h_passed_by_run.fill(hit_tree['run'][hit_tree['is_fiducial'] & hit_tree['is_matched']].astype(np.int64))
-
-    h_total_by_roll_run = Hist(roll_axis, run_axis)
-    h_passed_by_roll_run = h_total_by_roll_run.copy()
-    h_total_by_roll_run.fill(
-        hit_tree['roll_name'][hit_tree['is_fiducial']],
-        hit_tree['run'][hit_tree['is_fiducial']].astype(np.int64)
-    )
-    h_passed_by_roll_run.fill(
-        hit_tree['roll_name'][hit_tree['is_fiducial'] & hit_tree['is_matched']],
-        hit_tree['run'][hit_tree['is_fiducial'] & hit_tree['is_matched']].astype(np.int64)
-    )
-
-    h_total_by_run_ls = Hist(run_axis, ls_axis)
-    h_passed_by_run_ls = Hist(run_axis, ls_axis)
-    h_total_by_run_ls.fill(
-        hit_tree['run'][hit_tree['is_fiducial']].astype(np.int64),
-        hit_tree['luminosityBlock'][hit_tree['is_fiducial']].astype(np.int64)
-    )
-    h_passed_by_run_ls.fill(
-        hit_tree['run'][hit_tree['is_fiducial'] & hit_tree['is_matched']].astype(np.int64),
-        hit_tree['luminosityBlock'][hit_tree['is_fiducial'] & hit_tree['is_matched']].astype(np.int64)
-    )
-
-    roll_name = hit_tree.pop('roll_name')
-
-    hit_tree = ak.Array(hit_tree)
-    muon_tree = ak.Array(muon_tree)
+    trial_branches = {
+        key: np.asarray(value).dtype
+        for key, value in trial_tree.items()
+    }
+    pair_branches = {
+        key: np.asarray(value).dtype
+        for key, value in pair_tree.items()
+    }
 
     with uproot.writing.create(output_path) as output_file:
-        output_file['hit_tree'] = hit_tree
-        output_file['muon_tree'] = muon_tree
-        output_file['total_by_roll'] = h_total_by_roll
-        output_file['passed_by_roll'] = h_passed_by_roll
-        output_file['total_by_run'] = h_total_by_run
-        output_file['passed_by_run'] = h_passed_by_run
-        output_file['total_by_roll_run'] = h_total_by_roll_run
-        output_file['passed_by_roll_run'] = h_passed_by_roll_run
-        output_file['total_by_run_ls'] = h_total_by_run_ls
-        output_file['passed_by_run_ls'] = h_passed_by_run_ls
+        output_file.mktree('trial_tree', trial_branches)
+        output_file['trial_tree'].extend({
+            key: np.asarray(value)
+            for key, value in trial_tree.items()
+        })
 
-def safe_tree_arrays(tree, library="ak"):
-    try:
-        return tree.arrays(library=library)
-    except IndexError:
-        print(f"Skipping empty or corrupt tree: {tree.name}")
-        return ak.Array([])
-
-def merge_trees(tree_list):
-    if len(tree_list) == 0:
-        return ak.Array([])
-
-    with ThreadPoolExecutor() as executor:
-        arrays = list(executor.map(safe_tree_arrays, tree_list))
-
-    arrays = [arr for arr in arrays if len(arr) > 0]
-    if len(arrays) == 0:
-        return ak.Array([])
-
-    merged_tree = ak.concatenate(arrays, axis=0)
-    return merged_tree
-
-def merge_histograms(hist_list):
-    n_axes = len(hist_list[0].axes)
-    all_categories = [set() for _ in range(n_axes)]
-    for hist in hist_list:
-        for i in range(n_axes):
-            all_categories[i].update(hist.axes[i])
-    combined_axes = []
-    for i in range(n_axes):
-        if isinstance(hist_list[0].axes[i], StrCategory):
-            combined_axes.append(StrCategory(list(all_categories[i])))
-        elif isinstance(hist_list[0].axes[i], IntCategory):
-            combined_axes.append(IntCategory(list(all_categories[i])))
-        else:
-            raise ValueError(f"Unsupported axis type.")
-    
-    combined_hist = Hist(*combined_axes)
-
-    for hist in hist_list:
-        if n_axes == 1:
-            for cat, val in zip(hist.axes[0], hist.view()):
-                combined_hist.fill([cat], weight=[val])
-        elif n_axes == 2:
-            for x_idx, x_cat in enumerate(hist.axes[0]):
-                for y_idx, y_cat in enumerate(hist.axes[1]):
-                    value = hist.view(flow=False)[x_idx, y_idx]
-                    if value > 0:
-                        combined_hist.fill([x_cat], [y_cat], weight=value)            
-        else:
-            raise ValueError("Only 1D and 2D histograms are supported.")
-    return combined_hist
-
-def merge_flat_nanoaod_files(input_paths: Path,
-                             output_path: Path):
-    tree_lists = {}
-    hist_lists = {}
-
-    with uproot.open(input_paths[0]) as f:
-        for key in f.keys():
-            if f[key].classname.startswith("TTree"):
-                tree_lists[key] = []
-            elif f[key].classname.startswith("TH"):
-                hist_lists[key] = []
-
-    for input_path in input_paths:
-        with uproot.open(input_path) as f:
-            for tree_name in tree_lists:
-                tree_lists[tree_name].append(f[tree_name])
-            for hist_name in hist_lists:
-                hist_lists[hist_name].append(f[hist_name].to_hist())
-
-    merged_trees = {name: merge_trees(tree_list) for name, tree_list in tree_lists.items()}
-    merged_hists = {name: merge_histograms(hist_list) for name, hist_list in hist_lists.items()}
-
-    with uproot.recreate(output_path) as output_file:
-        for tree_name, merged_tree in merged_trees.items():
-            output_file[tree_name] = merged_tree
-
-        for hist_name, merged_hist in merged_hists.items():
-            output_file[hist_name] = merged_hist
-
+        output_file.mktree('pair_tree', pair_branches)
+        output_file['pair_tree'].extend({
+            key: np.asarray(value)
+            for key, value in pair_tree.items()
+        })
