@@ -6,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import uproot
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.colors import Colormap
 from matplotlib.patches import Polygon
@@ -14,7 +15,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import mplhep as mh
 from RPCDPGAnalysis.NanoAODTnP.RPCGeomServ import RPCRoll # type: ignore
 
-
+mpl.use('agg')
+mh.style.use(mh.styles.CMS)
 
 def plot_patches(patches: list[Polygon],
                  values: npt.NDArray[np.float32],
@@ -158,7 +160,7 @@ def plot_eff_roll(total_by_roll: pd.Series,
     vmin = 0
     vmax = 100 if percentage else 1
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(12, 9))
     fig = plot_patches(
         patches=patches,
         values=values,
@@ -191,8 +193,7 @@ def plot_eff_roll(total_by_roll: pd.Series,
     mh.cms.label(ax=ax, llabel=label, com=com, year=year)
 
     if output_path is not None:
-        for suffix in ['.pdf']:
-            fig.savefig(output_path.with_suffix(suffix))
+        fig.savefig(output_path.with_suffix('.png'))
 
     if close:
         plt.close(fig)

@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""
-"""
-from pathlib import Path
+
 import argparse
-import matplotlib as mpl
-import mplhep as mh
-from RPCDPGAnalysis.NanoAODTnP.Plotting import plot_eff_detector # type: ignore
+from pathlib import Path
 
-mpl.use('agg')
-mh.style.use(mh.styles.CMS)
-
+from RPCDPGAnalysis.NanoAODTnP.PlotEffDetector import plot_eff_detector # type: ignore
 
 def main():
     parser = argparse.ArgumentParser(
@@ -29,18 +23,9 @@ def main():
                         default=True,
                         help='express efficiency as a percentage')
     parser.add_argument('--roll-blacklist-path', default=None, type=Path,
-                        help=('json file containing a list of rolls to be '
-                              'excluded from plots'))
-
-    label_group = parser.add_mutually_exclusive_group()
-    label_list = ['Preliminary', 'Data', 'Simulation', 'Private Work']
-    for label in label_list:
-        flag = '--' + label.lower().replace(' ', '-')
-        help_msg = f"top left label is set to '{label}'"
-        label_group.add_argument(flag, action='store_const', dest='label',
-                                 const=label, help=help_msg)
-    parser.set_defaults(label=label_list[0])
-
+                        help=('json file containing a list of rolls to be excluded from plots'))
+    parser.add_argument('-l', '--label', default='Private Work', type=str,
+                        help='label to be used in plots (e.g. "CMS Preliminary")')
     args = parser.parse_args()
 
     plot_eff_detector(**vars(args))
