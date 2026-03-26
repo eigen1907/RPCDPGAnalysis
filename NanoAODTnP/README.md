@@ -42,8 +42,8 @@ rpc-tnp-flatten.py \
 ### Condor job for flatten nanoaod
 ```sh
 rpc-tnp-flatten-submit.py \
-    -i /eos/user/j/joshin/rpc/tnp/SingleMuon/Run2022C-27Jun2023-v1 \
-    -o /eos/user/j/joshin/rpc/tnp-flat/SingleMuon/Run2022C-27Jun2023-v1 \
+    -i /eos/user/j/joshin/rpc/tnp/Muon1/Run2025G-PromptReco-v1 \
+    -o /eos/user/j/joshin/rpc/tnp-flat/Muon1/Run2025G-PromptReco-v1 \
     -s ${CMSSW_BASE}/src/RPCDPGAnalysis/NanoAODTnP/scripts/rpc-tnp-flatten.py \
     -c ${CMSSW_BASE}/src/RPCDPGAnalysis/NanoAODTnP/data/cert \
     --batch-name rpc-tnp-flatten

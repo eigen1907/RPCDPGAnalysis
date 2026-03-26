@@ -23,6 +23,10 @@ def get_year(path: Path) -> str:
     return m.group(1)
 
 
+def output_exists(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -43,7 +47,8 @@ def main():
     parser.add_argument("--cpus", type=int, default=1)
     parser.add_argument("--batch-name", type=str, default="rpcTnPFlatten")
     parser.add_argument("--max-retries", type=int, default=3)
-    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--force", action="store_true",
+                        help="Submit even if output already exists")
     args = parser.parse_args()
 
     input_base = args.input_base.resolve()
@@ -76,6 +81,10 @@ def main():
         rel = f.relative_to(input_base)
         out = output_base / rel
 
+        if not args.force and output_exists(out):
+            skipped += 1
+            continue
+
         year = get_year(f)
         cert = cert_dir / CERT_MAP[year]
         if not cert.exists():
@@ -95,10 +104,10 @@ def main():
             "stem": f.stem,
             "name": args.name,
             "endpoint": args.endpoint,
-
         })
 
     print(f"found   : {len(files)}")
+    print(f"skip    : {skipped}")
     print(f"submit  : {len(itemdata)}")
 
     if not itemdata:
@@ -125,15 +134,12 @@ def main():
         "when_to_transfer_output": "ON_SUCCESS",
         "success_exit_code": "0",
         "transfer_input_files": "$(script_file),$(cert_file)",
-
         "request_cpus": str(args.cpus),
         "request_memory": str(args.memory),
         "request_disk": str(args.disk),
         "max_retries": str(args.max_retries),
-
         "JobBatchName": args.batch_name,
         "MY.SendCredential": "True",
-
         "output": "$(log_dir)/$(stem).$(ClusterId).$(ProcId).out",
         "error": "$(log_dir)/$(stem).$(ClusterId).$(ProcId).err",
         "log": "$(log_dir)/$(stem).$(ClusterId).log",
