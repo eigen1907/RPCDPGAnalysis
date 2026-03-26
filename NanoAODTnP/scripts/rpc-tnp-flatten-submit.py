@@ -2,6 +2,7 @@
 import argparse
 import re
 import sys
+import subprocess
 from pathlib import Path
 
 import htcondor2 as htcondor
@@ -16,6 +17,26 @@ CERT_MAP = {
 }
 
 
+def run_cmd(cmd):
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate()
+    return proc.returncode, out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
+
+
+def detect_storage(path: Path) -> str:
+    p = path.as_posix()
+    if p.startswith("/eos/"):
+        return "eos"
+    if p.startswith("/hdfs/"):
+        return "hdfs"
+    return "local"
+
+
+def to_hdfs_namespace(path: Path) -> str:
+    p = path.as_posix()
+    return p[5:] if p.startswith("/hdfs/") else p
+
+
 def get_year(path: Path) -> str:
     m = re.search(r"Run(20\d{2})", path.as_posix())
     if not m:
@@ -23,8 +44,45 @@ def get_year(path: Path) -> str:
     return m.group(1)
 
 
-def output_exists(path: Path) -> bool:
-    return path.is_file() and path.stat().st_size > 0
+def list_files_recursive(base: Path, pattern: str):
+    backend = detect_storage(base)
+
+    if backend != "hdfs":
+        return sorted(p for p in base.rglob(pattern) if p.is_file())
+
+    ns = to_hdfs_namespace(base)
+    ret, out, err = run_cmd(["hdfs", "dfs", "-ls", "-R", ns])
+    if ret != 0:
+        raise RuntimeError(f"hdfs dfs -ls failed for {ns}\n{err}")
+
+    regex = re.compile("^" + pattern.replace(".", r"\.").replace("*", ".*") + "$")
+    files = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line or line.startswith("Found "):
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        path_str = parts[-1]
+        if regex.match(Path(path_str).name):
+            files.append(Path("/hdfs") / path_str.lstrip("/"))
+    return sorted(files)
+
+
+def path_exists_and_nonempty(path: Path) -> bool:
+    backend = detect_storage(path)
+
+    if backend != "hdfs":
+        return path.is_file() and path.stat().st_size >= 0
+
+    ns = to_hdfs_namespace(path)
+    ret, _, _ = run_cmd(["hdfs", "dfs", "-test", "-e", ns])
+    return ret == 0
+
+
+def done_exists(output_path: Path) -> bool:
+    return path_exists_and_nonempty(Path(str(output_path) + ".done"))
 
 
 def main():
@@ -32,12 +90,9 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("-i", "--input-base", type=Path, required=True)
-    parser.add_argument("-o", "--output-base", type=Path, required=True,
-                        help="Final EOS output base path")
-    parser.add_argument("-s", "--script", type=Path, required=True,
-                        help="Path to rpc-tnp-flatten.py")
-    parser.add_argument("-c", "--cert-dir", type=Path, required=True,
-                        help="Directory containing cert JSON files")
+    parser.add_argument("-o", "--output-base", type=Path, required=True)
+    parser.add_argument("-s", "--script", type=Path, required=True)
+    parser.add_argument("-c", "--cert-dir", type=Path, required=True)
     parser.add_argument("-n", "--name", type=str, default="rpcTnP")
     parser.add_argument("--pattern", type=str, default="output_*.root")
     parser.add_argument("--endpoint", type=str, default="root://eosuser.cern.ch")
@@ -47,18 +102,16 @@ def main():
     parser.add_argument("--cpus", type=int, default=1)
     parser.add_argument("--batch-name", type=str, default="rpcTnPFlatten")
     parser.add_argument("--max-retries", type=int, default=3)
-    parser.add_argument("--force", action="store_true",
-                        help="Submit even if output already exists")
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
-    input_base = args.input_base.resolve()
+    input_base = args.input_base
     output_base = args.output_base
     script = args.script.resolve()
     cert_dir = args.cert_dir.resolve()
     submit_dir = args.submit_dir.resolve()
-    log_root = submit_dir
 
-    if not input_base.exists():
+    if detect_storage(input_base) == "local" and not input_base.exists():
         raise FileNotFoundError(f"Input base not found: {input_base}")
     if not script.exists():
         raise FileNotFoundError(f"Script not found: {script}")
@@ -66,22 +119,20 @@ def main():
         raise FileNotFoundError(f"Cert dir not found: {cert_dir}")
 
     submit_dir.mkdir(parents=True, exist_ok=True)
-    log_root.mkdir(parents=True, exist_ok=True)
 
-    files = sorted(p for p in input_base.rglob(args.pattern) if p.is_file())
+    files = list_files_recursive(input_base, args.pattern)
     if not files:
         raise RuntimeError(f"No files matched: {input_base}/**/{args.pattern}")
 
     itemdata = []
     skipped = 0
-
     python_exec = Path(sys.executable).resolve()
 
     for f in files:
         rel = f.relative_to(input_base)
         out = output_base / rel
 
-        if not args.force and output_exists(out):
+        if not args.force and done_exists(out):
             skipped += 1
             continue
 
@@ -90,7 +141,7 @@ def main():
         if not cert.exists():
             raise FileNotFoundError(f"Cert file not found: {cert}")
 
-        log_dir = log_root / rel.parent
+        log_dir = submit_dir / rel.parent
         log_dir.mkdir(parents=True, exist_ok=True)
 
         itemdata.append({
@@ -114,9 +165,6 @@ def main():
         print("Nothing to submit")
         return
 
-    credd = htcondor.Credd()
-    credd.add_user_cred(htcondor.CredTypes.Kerberos, None)
-
     submit = Submit({
         "universe": "vanilla",
         "getenv": "True",
@@ -139,7 +187,6 @@ def main():
         "request_disk": str(args.disk),
         "max_retries": str(args.max_retries),
         "JobBatchName": args.batch_name,
-        "MY.SendCredential": "True",
         "output": "$(log_dir)/$(stem).$(ClusterId).$(ProcId).out",
         "error": "$(log_dir)/$(stem).$(ClusterId).$(ProcId).err",
         "log": "$(log_dir)/$(stem).$(ClusterId).log",
@@ -153,7 +200,7 @@ def main():
     )
 
     print(f"Submitted cluster_id={cluster_id}")
-    print(f"Logs: {log_root}")
+    print(f"Logs: {submit_dir}")
 
 
 if __name__ == "__main__":
