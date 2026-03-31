@@ -1,0 +1,18 @@
+CMSSW_BASE  = /afs/cern.ch/user/j/joshin/workspace-lxplus/rpc-tnp/CMSSW_16_1_0_pre1
+PKG_BASE    = $(CMSSW_BASE)/src/RPCDPGAnalysis/NanoAODTnP
+LOG_BASE    = $(PKG_BASE)/logs/condor/$(SUBMIT_TAG)
+
+universe = vanilla
+
+executable = $(PKG_BASE)/scripts/rpc-tnp-flatten-run.sh
+arguments  = $(CMSSW_BASE) $(input_eos) $(cert_path) $(output_eos) rpcTnP
+
+should_transfer_files = NO
+
+output = $(LOG_BASE)/$(pd)/$(dataset_name)/stdout/$(ClusterId).$(ProcId).out
+error  = $(LOG_BASE)/$(pd)/$(dataset_name)/stderr/$(ClusterId).$(ProcId).err
+log    = $(LOG_BASE)/$(pd)/$(dataset_name)/log/$(ClusterId).log
+
+JobBatchName = rpc-tnp-flatten-$(pd)-$(dataset_name)-$(SUBMIT_TAG)
+
+queue input_eos, cert_path, output_eos, pd, dataset_name from $(ITEMS_FILE)
