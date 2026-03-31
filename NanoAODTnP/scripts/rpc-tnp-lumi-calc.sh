@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CRAB_BASE="${CMSSW_BASE}/src/RPCDPGAnalysis/NanoAODTnP/logs/crab"
 CERT_BASE="${CMSSW_BASE}/src/RPCDPGAnalysis/NanoAODTnP/data/cert"
-OUT_BASE="$(pwd)/lumi"
+CRAB_BASE="${CMSSW_BASE}/src/RPCDPGAnalysis/NanoAODTnP/logs/crab/v1"
+OUT_BASE="${CMSSW_BASE}/src/RPCDPGAnalysis/NanoAODTnP/logs/lumi/v1"
 
 mkdir -p "${OUT_BASE}"
 
@@ -29,14 +29,18 @@ for year in Run2022 Run2023 Run2024 Run2025; do
 
     src_processed="${results_dir}/processedLumis.json"
     dst_processed="${dataset_dir}/processedLumis.json"
-    dst_masked="${dataset_dir}/processedLumis_Golden.json"
-    dst_csv="${dataset_dir}/brilcalc_processed_Golden.csv"
+    dst_golden="${dataset_dir}/processedLumis_Golden.json"
+
+    csv_processed="${dataset_dir}/brilcalc_processed.csv"
+    csv_golden="${dataset_dir}/brilcalc_processed_Golden.csv"
 
     [[ -f "${src_processed}" ]] || continue
 
     cp "${src_processed}" "${dst_processed}"
-    compareJSON.py --and "${dst_processed}" "${cert_json}" "${dst_masked}" > /dev/null
-    brilcalc lumi -u /fb -i "${dst_masked}" -o "${dst_csv}"
+    compareJSON.py --and "${dst_processed}" "${cert_json}" "${dst_golden}" > /dev/null
+
+    brilcalc lumi -u /fb -i "${dst_processed}" -o "${csv_processed}"
+    brilcalc lumi -u /fb -i "${dst_golden}" -o "${csv_golden}"
 
     echo "[INFO] wrote ${dataset_dir}"
   done
