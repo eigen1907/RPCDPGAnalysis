@@ -12,7 +12,7 @@ for version_dir in "${INPUT_BASE}"/v*; do
     [ -d "${version_dir}" ] || continue
     version="$(basename "${version_dir}")"
 
-    for pd_dir in "${version_dir}"/*; do
+    for pd_dir in "${version_dir}"/Muon1; do
         [ -d "${pd_dir}" ] || continue
         pd="$(basename "${pd_dir}")"
 
