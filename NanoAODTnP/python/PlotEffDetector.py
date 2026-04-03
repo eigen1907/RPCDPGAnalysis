@@ -24,6 +24,17 @@ from RPCDPGAnalysis.NanoAODTnP.RPCGeomServ import RPCRoll  # type: ignore
 mh.style.use(mh.styles.CMS)
 
 
+ROLL_KEY_DTYPE = np.dtype([
+    ("region", np.int16),
+    ("ring", np.int16),
+    ("station", np.int16),
+    ("sector", np.int16),
+    ("layer", np.int16),
+    ("subsector", np.int16),
+    ("roll", np.int16),
+])
+
+
 def plot_patches(
     patches: list[Polygon],
     values: npt.NDArray[np.float32],
@@ -139,9 +150,111 @@ def _resolve_input_files(input_path: Path) -> list[Path]:
     raise FileNotFoundError(f"Input path does not exist: {input_path}")
 
 
+def make_roll_key_array_from_arrays(arrays: dict[str, np.ndarray]) -> np.ndarray:
+    out = np.empty(len(arrays["region"]), dtype=ROLL_KEY_DTYPE)
+    out["region"] = np.asarray(arrays["region"], dtype=np.int16)
+    out["ring"] = np.asarray(arrays["ring"], dtype=np.int16)
+    out["station"] = np.asarray(arrays["station"], dtype=np.int16)
+    out["sector"] = np.asarray(arrays["sector"], dtype=np.int16)
+    out["layer"] = np.asarray(arrays["layer"], dtype=np.int16)
+    out["subsector"] = np.asarray(arrays["subsector"], dtype=np.int16)
+    out["roll"] = np.asarray(arrays["roll"], dtype=np.int16)
+    return out
+
+
+def make_roll_key_tuples_from_arrays(
+    arrays: dict[str, np.ndarray],
+) -> list[tuple[int, int, int, int, int, int, int]]:
+    return list(zip(
+        np.asarray(arrays["region"], dtype=np.int16).tolist(),
+        np.asarray(arrays["ring"], dtype=np.int16).tolist(),
+        np.asarray(arrays["station"], dtype=np.int16).tolist(),
+        np.asarray(arrays["sector"], dtype=np.int16).tolist(),
+        np.asarray(arrays["layer"], dtype=np.int16).tolist(),
+        np.asarray(arrays["subsector"], dtype=np.int16).tolist(),
+        np.asarray(arrays["roll"], dtype=np.int16).tolist(),
+    ))
+
+
+def build_geom_roll_name_map(
+    geom: pd.DataFrame,
+) -> dict[tuple[int, int, int, int, int, int, int], str]:
+    key_cols = ["region", "ring", "station", "sector", "layer", "subsector", "roll"]
+    geom_key = geom[key_cols + ["roll_name"]].drop_duplicates()
+
+    geom_arrays = {
+        "region": geom_key["region"].to_numpy(np.int16),
+        "ring": geom_key["ring"].to_numpy(np.int16),
+        "station": geom_key["station"].to_numpy(np.int16),
+        "sector": geom_key["sector"].to_numpy(np.int16),
+        "layer": geom_key["layer"].to_numpy(np.int16),
+        "subsector": geom_key["subsector"].to_numpy(np.int16),
+        "roll": geom_key["roll"].to_numpy(np.int16),
+    }
+    geom_keys = make_roll_key_tuples_from_arrays(geom_arrays)
+    roll_names = geom_key["roll_name"].to_numpy(dtype=object)
+
+    return {key: name for key, name in zip(geom_keys, roll_names)}
+
+
+def map_roll_keys_to_names(
+    roll_keys: np.ndarray,
+    roll_name_map: dict[tuple[int, int, int, int, int, int, int], str],
+    input_file: Path,
+) -> np.ndarray:
+    unique_keys, inverse = np.unique(roll_keys, return_inverse=True)
+
+    unique_key_tuples = [
+        (
+            int(key["region"]),
+            int(key["ring"]),
+            int(key["station"]),
+            int(key["sector"]),
+            int(key["layer"]),
+            int(key["subsector"]),
+            int(key["roll"]),
+        )
+        for key in unique_keys
+    ]
+
+    unique_names = []
+    missing_keys = []
+
+    for key_tuple in unique_key_tuples:
+        name = roll_name_map.get(key_tuple)
+        if name is None:
+            missing_keys.append(key_tuple)
+            unique_names.append(None)
+        else:
+            unique_names.append(name)
+
+    if len(missing_keys) > 0:
+        missing_rows = pd.DataFrame(
+            missing_keys,
+            columns=["region", "ring", "station", "sector", "layer", "subsector", "roll"],
+        )
+        raise ValueError(
+            "Some trial_tree rows could not be matched to geom.csv.\n"
+            f"Input file: {input_file}\n"
+            f"Number of unmatched detector keys: {len(missing_keys)}\n"
+            f"Examples:\n{missing_rows.head()}"
+        )
+
+    unique_names = np.asarray(unique_names, dtype=object)
+    return unique_names[inverse]
+
+
+def count_names(values: np.ndarray) -> pd.Series:
+    if len(values) == 0:
+        return pd.Series(dtype=np.int64)
+
+    unique_names, counts = np.unique(values, return_counts=True)
+    return pd.Series(counts.astype(np.int64), index=unique_names)
+
+
 def load_eff_detector(
     input_path: Path,
-    geom_path: Path,
+    geom: pd.DataFrame,
 ):
     input_files = _resolve_input_files(input_path)
 
@@ -150,9 +263,7 @@ def load_eff_detector(
         "is_fiducial", "is_matched",
     ]
 
-    geom = pd.read_csv(geom_path)
-    key_cols = ["region", "ring", "station", "sector", "layer", "subsector", "roll"]
-    geom_key = geom[key_cols + ["roll_name"]].drop_duplicates()
+    roll_name_map = build_geom_roll_name_map(geom)
 
     total_by_roll = pd.Series(dtype=np.int64)
     passed_by_roll = pd.Series(dtype=np.int64)
@@ -164,44 +275,18 @@ def load_eff_detector(
 
             arrays = input_file["trial_tree"].arrays(branches, library="np")
 
-        trial_df = pd.DataFrame({key: arrays[key] for key in branches})
-
-        trial_df = trial_df.merge(
-            geom_key,
-            on=key_cols,
-            how="left",
-            validate="many_to_one",
+        roll_keys = make_roll_key_array_from_arrays(arrays)
+        roll_names = map_roll_keys_to_names(
+            roll_keys=roll_keys,
+            roll_name_map=roll_name_map,
+            input_file=each_input_path,
         )
 
-        missing_mask = trial_df["roll_name"].isna()
-        if missing_mask.any():
-            missing_rows = trial_df.loc[missing_mask, key_cols].drop_duplicates()
-            raise ValueError(
-                "Some trial_tree rows could not be matched to geom.csv.\n"
-                f"Input file: {each_input_path}\n"
-                f"Number of unmatched detector keys: {len(missing_rows)}\n"
-                f"Examples:\n{missing_rows.head()}"
-            )
+        fiducial_mask = np.asarray(arrays["is_fiducial"], dtype=bool)
+        passed_mask = fiducial_mask & np.asarray(arrays["is_matched"], dtype=bool)
 
-        fiducial_mask = trial_df["is_fiducial"].astype(bool).to_numpy()
-        passed_mask = (
-            trial_df["is_fiducial"].astype(bool).to_numpy()
-            & trial_df["is_matched"].astype(bool).to_numpy()
-        )
-
-        each_total_by_roll = (
-            trial_df.loc[fiducial_mask]
-            .groupby("roll_name")
-            .size()
-            .astype(np.int64)
-        )
-
-        each_passed_by_roll = (
-            trial_df.loc[passed_mask]
-            .groupby("roll_name")
-            .size()
-            .astype(np.int64)
-        )
+        each_total_by_roll = count_names(roll_names[fiducial_mask])
+        each_passed_by_roll = count_names(roll_names[passed_mask])
 
         total_by_roll = total_by_roll.add(each_total_by_roll, fill_value=0)
         passed_by_roll = passed_by_roll.add(each_passed_by_roll, fill_value=0)
@@ -345,12 +430,13 @@ def plot_eff_detector(
         with open(roll_blacklist_path) as stream:
             roll_blacklist = set(json.load(stream))
 
+    geom = pd.read_csv(geom_path)
+
     total_by_roll, passed_by_roll = load_eff_detector(
         input_path=input_path,
-        geom_path=geom_path,
+        geom=geom,
     )
 
-    geom = pd.read_csv(geom_path)
     roll_list = [
         RPCRoll.from_row(row)
         for _, row in geom.iterrows()

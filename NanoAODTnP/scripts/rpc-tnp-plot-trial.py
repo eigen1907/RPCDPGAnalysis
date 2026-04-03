@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -37,15 +36,13 @@ ROLL_KEY_FIELDS = (
     "roll",
 )
 
-ROLL_KEY_DTYPE = np.dtype([
-    ("region", np.int16),
-    ("ring", np.int16),
-    ("station", np.int16),
-    ("sector", np.int16),
-    ("layer", np.int16),
-    ("subsector", np.int16),
-    ("roll", np.int16),
-])
+CLS_MIN = 1
+CLS_MAX = 10
+CLS_NBINS = CLS_MAX - CLS_MIN + 1
+
+BX_MIN = -4
+BX_MAX = 4
+BX_NBINS = BX_MAX - BX_MIN + 1
 
 
 @dataclass(frozen=True)
@@ -53,7 +50,20 @@ class DatasetSpec:
     year: int
     lumi: float | None
     input_path: Path
-    exclude_json: Path
+
+
+@dataclass(frozen=True)
+class RegionObservableSummary:
+    hist_counts: np.ndarray
+    mean_value: float
+
+
+@dataclass(frozen=True)
+class DatasetSummary:
+    spec: DatasetSpec
+    roll_eff_by_region: dict[str, np.ndarray]
+    eff_summary_by_region: dict[str, tuple[float, float]]
+    observable_summary_by_region: dict[str, dict[str, RegionObservableSummary]]
 
 
 def parse_args() -> argparse.Namespace:
@@ -86,14 +96,6 @@ def parse_args() -> argparse.Namespace:
         help="Integrated luminosity matched to each input/year. Repeat in the same order as --input."
     )
     parser.add_argument(
-        "--exclude-json",
-        dest="exclude_jsons",
-        action="append",
-        required=True,
-        type=Path,
-        help="Excluded-roll JSON path matched to each input/year."
-    )
-    parser.add_argument(
         "-s", "--com",
         type=float,
         default=13.6,
@@ -114,6 +116,12 @@ def parse_args() -> argparse.Namespace:
         "--tree-name",
         default="trial_tree",
         help="Input tree name."
+    )
+    parser.add_argument(
+        "--eff-threshold",
+        type=float,
+        default=70.0,
+        help="Remove rolls with efficiency <= threshold."
     )
     parser.add_argument(
         "--eff-xmin",
@@ -157,11 +165,6 @@ def parse_args() -> argparse.Namespace:
             f"Number of --lumi ({len(args.lumis)}) must be either 0 or match --input ({len(args.inputs)})"
         )
 
-    if len(args.exclude_jsons) != len(args.inputs):
-        raise RuntimeError(
-            f"Number of --exclude-json ({len(args.exclude_jsons)}) must match --input ({len(args.inputs)})"
-        )
-
     return args
 
 
@@ -186,109 +189,6 @@ def is_irpc(region: np.ndarray, ring: np.ndarray, station: np.ndarray) -> np.nda
     return (region != 0) & (ring == 1) & np.isin(station, [3, 4])
 
 
-def make_roll_key_array_from_columns(
-    region: np.ndarray,
-    ring: np.ndarray,
-    station: np.ndarray,
-    sector: np.ndarray,
-    layer: np.ndarray,
-    subsector: np.ndarray,
-    roll: np.ndarray,
-) -> np.ndarray:
-    out = np.empty(len(region), dtype=ROLL_KEY_DTYPE)
-    out["region"] = region.astype(np.int16, copy=False)
-    out["ring"] = ring.astype(np.int16, copy=False)
-    out["station"] = station.astype(np.int16, copy=False)
-    out["sector"] = sector.astype(np.int16, copy=False)
-    out["layer"] = layer.astype(np.int16, copy=False)
-    out["subsector"] = subsector.astype(np.int16, copy=False)
-    out["roll"] = roll.astype(np.int16, copy=False)
-    return out
-
-
-def make_roll_key_array(arrays: dict[str, np.ndarray]) -> np.ndarray:
-    return make_roll_key_array_from_columns(
-        region=arrays["region"],
-        ring=arrays["ring"],
-        station=arrays["station"],
-        sector=arrays["sector"],
-        layer=arrays["layer"],
-        subsector=arrays["subsector"],
-        roll=arrays["roll"],
-    )
-
-
-def load_arrays(
-    path: Path,
-    tree_name: str,
-    branches: Sequence[str],
-) -> dict[str, np.ndarray]:
-    with uproot.open(path) as root_file:
-        if tree_name not in root_file:
-            raise RuntimeError(f"Missing tree '{tree_name}' in {path}")
-
-        tree = root_file[tree_name]
-        keys = set(tree.keys())
-
-        missing = [branch for branch in branches if branch not in keys]
-        if missing:
-            raise RuntimeError(
-                f"Missing branches in {path}:{tree_name}: {', '.join(missing)}"
-            )
-
-        arrays = tree.arrays(list(branches), library="np")
-
-    out: dict[str, np.ndarray] = {}
-    for branch in branches:
-        value = np.asarray(arrays[branch])
-        if branch == "is_matched":
-            out[branch] = value.astype(bool, copy=False)
-        else:
-            out[branch] = value
-    return out
-
-
-def load_excluded_roll_keys(json_path: Path) -> np.ndarray:
-    with open(json_path, "r", encoding="utf-8") as fin:
-        payload = json.load(fin)
-
-    if "excluded_roll_details_excluding_irpc" in payload:
-        rows = payload["excluded_roll_details_excluding_irpc"]
-    elif "excluded_roll_details_including_irpc" in payload:
-        rows = [
-            row for row in payload["excluded_roll_details_including_irpc"]
-            if not bool(row.get("is_irpc", False))
-        ]
-    elif "excluded_roll_details" in payload:
-        rows = [
-            row for row in payload["excluded_roll_details"]
-            if not (
-                int(row["region"]) != 0
-                and int(row["ring"]) == 1
-                and int(row["station"]) in (3, 4)
-            )
-        ]
-    else:
-        raise RuntimeError(
-            f"Missing excluded-roll details in {json_path}. "
-            "Expected excluded_roll_details_excluding_irpc or equivalent."
-        )
-
-    if len(rows) == 0:
-        return np.empty(0, dtype=ROLL_KEY_DTYPE)
-
-    keys = make_roll_key_array_from_columns(
-        region=np.asarray([row["region"] for row in rows], dtype=np.int16),
-        ring=np.asarray([row["ring"] for row in rows], dtype=np.int16),
-        station=np.asarray([row["station"] for row in rows], dtype=np.int16),
-        sector=np.asarray([row["sector"] for row in rows], dtype=np.int16),
-        layer=np.asarray([row["layer"] for row in rows], dtype=np.int16),
-        subsector=np.asarray([row["subsector"] for row in rows], dtype=np.int16),
-        roll=np.asarray([row["roll"] for row in rows], dtype=np.int16),
-    )
-    return np.unique(keys)
-
-
 def get_region_title(region_name: str) -> str:
     if region_name == "barrel":
         return "RPC Barrel"
@@ -297,151 +197,28 @@ def get_region_title(region_name: str) -> str:
     raise RuntimeError(f"Unknown region_name: {region_name}")
 
 
-def get_region_mask_from_arrays(
-    arrays: dict[str, np.ndarray],
-    region_name: str,
-) -> np.ndarray:
-    region = arrays["region"]
-    ring = arrays["ring"]
-    station = arrays["station"]
-
-    if region_name == "barrel":
-        return region == 0
-
-    if region_name == "endcap":
-        return (region != 0) & (~is_irpc(region, ring, station))
-
-    raise RuntimeError(f"Unknown region_name: {region_name}")
-
-
-def get_region_mask_from_roll_table(
-    roll_table: dict[str, np.ndarray],
-    region_name: str,
-) -> np.ndarray:
-    if region_name == "barrel":
-        return roll_table["region"] == 0
-
-    if region_name == "endcap":
-        return (roll_table["region"] != 0) & (~roll_table["is_irpc"])
-
-    raise RuntimeError(f"Unknown region_name: {region_name}")
-
-
-def build_roll_efficiency_table(arrays: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-    roll_keys = make_roll_key_array(arrays)
-    unique_keys, inverse = np.unique(roll_keys, return_inverse=True)
-
-    total_counts = np.bincount(inverse)
-    pass_counts = np.bincount(
-        inverse,
-        weights=arrays["is_matched"].astype(np.int64),
-    ).astype(np.int64)
-    efficiency = 100.0 * pass_counts / total_counts
-
-    region = unique_keys["region"].astype(np.int16, copy=False)
-    ring = unique_keys["ring"].astype(np.int16, copy=False)
-    station = unique_keys["station"].astype(np.int16, copy=False)
-    irpc_mask = is_irpc(region, ring, station)
-
-    return {
-        "roll_keys": unique_keys,
-        "region": region,
-        "ring": ring,
-        "station": station,
-        "total": total_counts.astype(np.int64),
-        "passed": pass_counts.astype(np.int64),
-        "efficiency": efficiency.astype(np.float64),
-        "is_irpc": irpc_mask.astype(bool),
-    }
-
-
-def select_roll_efficiencies_from_table(
-    roll_table: dict[str, np.ndarray],
-    excluded_roll_keys: np.ndarray,
-    region_name: str,
-) -> np.ndarray:
-    mask = get_region_mask_from_roll_table(roll_table, region_name)
-
-    roll_keys = roll_table["roll_keys"][mask]
-    eff = roll_table["efficiency"][mask]
-
-    if len(excluded_roll_keys) > 0:
-        keep = ~np.isin(roll_keys, excluded_roll_keys)
-        eff = eff[keep]
-
-    return eff[np.isfinite(eff)]
-
-
-def select_observable_values(
-    arrays: dict[str, np.ndarray],
-    excluded_roll_keys: np.ndarray,
-    region_name: str,
-    branch_name: str,
-    min_value: float,
-    max_value: float,
-) -> np.ndarray:
-    mask = get_region_mask_from_arrays(arrays, region_name)
-    mask &= arrays["is_matched"]
-
-    if len(excluded_roll_keys) > 0:
-        roll_keys = make_roll_key_array(arrays)
-        mask &= ~np.isin(roll_keys, excluded_roll_keys)
-
-    values = np.asarray(arrays[branch_name][mask], dtype=np.float64)
-    values = values[np.isfinite(values)]
-    values = values[(values >= min_value) & (values <= max_value)]
-    return values
-
-
-def compute_mean(values: np.ndarray) -> float:
-    if len(values) == 0:
-        return np.nan
-    return float(np.mean(values))
-
-
-def compute_histogram(values: np.ndarray, edges: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    counts, hist_edges = np.histogram(values, bins=edges)
-    return counts.astype(np.float64), hist_edges.astype(np.float64)
-
-
-def compute_efficiency_summary_from_table(
-    roll_table: dict[str, np.ndarray],
-    excluded_roll_keys: np.ndarray,
-    region_name: str,
+def compute_efficiency_summary_from_efficiencies(
+    eff: np.ndarray,
+    eff_threshold: float,
 ) -> tuple[float, float]:
-    eff = select_roll_efficiencies_from_table(
-        roll_table=roll_table,
-        excluded_roll_keys=excluded_roll_keys,
-        region_name=region_name,
-    )
-
     if len(eff) == 0:
         return np.nan, np.nan
 
-    good_eff = eff[eff > 70.0]
+    good_eff = eff[eff > eff_threshold]
     mean_good = float(np.mean(good_eff)) if len(good_eff) > 0 else np.nan
-    frac_bad = float(100.0 * np.mean(eff <= 70.0))
-
+    frac_bad = float(100.0 * np.mean(eff <= eff_threshold))
     return mean_good, frac_bad
 
 
 def build_efficiency_legend_row(
     year: int,
     lumi: float | None,
-    roll_table: dict[str, np.ndarray],
-    excluded_roll_keys: np.ndarray,
-    region_name: str,
+    mean_good: float,
+    frac_bad: float,
 ) -> str:
     year_text = build_year_label_unicode(year, lumi)
-    mean_good, frac_bad = compute_efficiency_summary_from_table(
-        roll_table=roll_table,
-        excluded_roll_keys=excluded_roll_keys,
-        region_name=region_name,
-    )
-
     mean_text = f"{mean_good:.1f} %" if np.isfinite(mean_good) else "nan"
     frac_text = f"{frac_bad:.1f} %" if np.isfinite(frac_bad) else "nan"
-
     return f"{year_text:<18}{mean_text:>10}{frac_text:>10}"
 
 
@@ -489,9 +266,359 @@ def style_log_y_axis(ax: plt.Axes, positive_counts: np.ndarray) -> None:
         ax.set_ylim(ymin, ymax)
 
 
-def plot_roll_efficiency_distribution(
-    dataset_specs: Sequence[DatasetSpec],
+def build_dataset_specs(
+    input_paths: Sequence[Path],
+    years: Sequence[int],
+    lumis: Sequence[float] | None,
+) -> list[DatasetSpec]:
+    specs: list[DatasetSpec] = []
+
+    for idx, input_path in enumerate(input_paths):
+        lumi = None if lumis is None or len(lumis) == 0 else lumis[idx]
+        specs.append(
+            DatasetSpec(
+                year=years[idx],
+                lumi=lumi,
+                input_path=input_path,
+            )
+        )
+
+    return specs
+
+
+def pack_roll_codes(
+    region: np.ndarray,
+    ring: np.ndarray,
+    station: np.ndarray,
+    sector: np.ndarray,
+    layer: np.ndarray,
+    subsector: np.ndarray,
+    roll: np.ndarray,
+) -> np.ndarray:
+    region_u = region.astype(np.int64, copy=False) + 1
+    ring_u = ring.astype(np.int64, copy=False) + 8
+    station_u = station.astype(np.int64, copy=False)
+    sector_u = sector.astype(np.int64, copy=False)
+    layer_u = layer.astype(np.int64, copy=False)
+    subsector_u = subsector.astype(np.int64, copy=False)
+    roll_u = roll.astype(np.int64, copy=False)
+
+    code = region_u
+    code = (code << 5) | ring_u
+    code = (code << 4) | station_u
+    code = (code << 6) | sector_u
+    code = (code << 3) | layer_u
+    code = (code << 4) | subsector_u
+    code = (code << 4) | roll_u
+    return code
+
+
+def unpack_roll_codes(codes: np.ndarray) -> tuple[np.ndarray, ...]:
+    codes = codes.astype(np.int64, copy=False)
+
+    roll = codes & 0xF
+    codes = codes >> 4
+
+    subsector = codes & 0xF
+    codes = codes >> 4
+
+    layer = codes & 0x7
+    codes = codes >> 3
+
+    sector = codes & 0x3F
+    codes = codes >> 6
+
+    station = codes & 0xF
+    codes = codes >> 4
+
+    ring = (codes & 0x1F) - 8
+    codes = codes >> 5
+
+    region = codes - 1
+
+    return (
+        region.astype(np.int16),
+        ring.astype(np.int16),
+        station.astype(np.int16),
+        sector.astype(np.int16),
+        layer.astype(np.int16),
+        subsector.astype(np.int16),
+        roll.astype(np.int16),
+    )
+
+
+def histogram_by_group(
+    inverse: np.ndarray,
+    values: np.ndarray,
+    n_groups: int,
+    value_min: int,
+    value_max: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    valid = (
+        np.isfinite(values)
+        & (values >= value_min)
+        & (values <= value_max)
+    )
+
+    values_i = values[valid].astype(np.int64, copy=False) - value_min
+    inverse_i = inverse[valid]
+    n_bins = value_max - value_min + 1
+
+    hist = np.bincount(
+        inverse_i * n_bins + values_i,
+        minlength=n_groups * n_bins,
+    ).reshape(n_groups, n_bins).astype(np.float64)
+
+    value_sum = np.bincount(
+        inverse_i,
+        weights=values[valid],
+        minlength=n_groups,
+    ).astype(np.float64)
+
+    value_count = np.bincount(
+        inverse_i,
+        minlength=n_groups,
+    ).astype(np.int64)
+
+    return hist, value_sum, value_count
+
+
+def make_empty_summary(spec: DatasetSpec) -> DatasetSummary:
+    empty_eff = np.empty(0, dtype=np.float64)
+    empty_cls = np.zeros(CLS_NBINS, dtype=np.float64)
+    empty_bx = np.zeros(BX_NBINS, dtype=np.float64)
+
+    return DatasetSummary(
+        spec=spec,
+        roll_eff_by_region={
+            "barrel": empty_eff,
+            "endcap": empty_eff,
+        },
+        eff_summary_by_region={
+            "barrel": (np.nan, np.nan),
+            "endcap": (np.nan, np.nan),
+        },
+        observable_summary_by_region={
+            "barrel": {
+                "cls": RegionObservableSummary(hist_counts=empty_cls, mean_value=np.nan),
+                "bx": RegionObservableSummary(hist_counts=empty_bx, mean_value=np.nan),
+            },
+            "endcap": {
+                "cls": RegionObservableSummary(hist_counts=empty_cls.copy(), mean_value=np.nan),
+                "bx": RegionObservableSummary(hist_counts=empty_bx.copy(), mean_value=np.nan),
+            },
+        },
+    )
+
+
+def summarize_dataset(
+    spec: DatasetSpec,
     tree_name: str,
+    eff_threshold: float,
+) -> DatasetSummary:
+    print(f"[info] year={spec.year}: opening {spec.input_path}", flush=True)
+
+    branches = list(ROLL_KEY_FIELDS) + ["is_fiducial", "is_matched", "cls", "bx"]
+
+    with uproot.open(spec.input_path) as root_file:
+        if tree_name not in root_file:
+            raise RuntimeError(f"Missing tree '{tree_name}' in {spec.input_path}")
+
+        tree = root_file[tree_name]
+        print(
+            f"[info] year={spec.year}: reading tree='{tree_name}' "
+            f"with {tree.num_entries} entries",
+            flush=True,
+        )
+        arrays = tree.arrays(branches, library="np")
+
+    print(f"[info] year={spec.year}: finished reading arrays", flush=True)
+
+    region = np.asarray(arrays["region"])
+    ring = np.asarray(arrays["ring"])
+    station = np.asarray(arrays["station"])
+    sector = np.asarray(arrays["sector"])
+    layer = np.asarray(arrays["layer"])
+    subsector = np.asarray(arrays["subsector"])
+    roll = np.asarray(arrays["roll"])
+    is_fiducial = np.asarray(arrays["is_fiducial"]).astype(bool, copy=False)
+    is_matched = np.asarray(arrays["is_matched"]).astype(bool, copy=False)
+    cls_values = np.asarray(arrays["cls"], dtype=np.float64)
+    bx_values = np.asarray(arrays["bx"], dtype=np.float64)
+
+    print(
+        f"[info] year={spec.year}: arrays loaded, n_trials={len(region)}",
+        flush=True,
+    )
+
+    if len(region) == 0:
+        print(f"[info] year={spec.year}: empty dataset", flush=True)
+        return make_empty_summary(spec)
+
+    print(f"[info] year={spec.year}: packing roll codes", flush=True)
+    roll_codes = pack_roll_codes(
+        region=region,
+        ring=ring,
+        station=station,
+        sector=sector,
+        layer=layer,
+        subsector=subsector,
+        roll=roll,
+    )
+
+    print(f"[info] year={spec.year}: grouping by roll", flush=True)
+    unique_codes, inverse = np.unique(roll_codes, return_inverse=True)
+    n_rolls = len(unique_codes)
+
+    print(
+        f"[info] year={spec.year}: found {n_rolls} unique rolls",
+        flush=True,
+    )
+
+    valid_den = is_fiducial
+    valid_num = is_fiducial & is_matched
+
+    total_counts = np.bincount(
+        inverse,
+        weights=valid_den.astype(np.int64, copy=False),
+        minlength=n_rolls,
+    ).astype(np.int64)
+
+    pass_counts = np.bincount(
+        inverse,
+        weights=valid_num.astype(np.int64, copy=False),
+        minlength=n_rolls,
+    ).astype(np.int64)
+
+    efficiency = np.full(n_rolls, np.nan, dtype=np.float64)
+    valid_roll_mask = total_counts > 0
+    efficiency[valid_roll_mask] = 100.0 * pass_counts[valid_roll_mask] / total_counts[valid_roll_mask]
+
+    print(f"[info] year={spec.year}: unpacking roll metadata", flush=True)
+    u_region, u_ring, u_station, _, _, _, _ = unpack_roll_codes(unique_codes)
+    irpc_mask = is_irpc(u_region, u_ring, u_station)
+    bad_eff_mask = valid_roll_mask & (efficiency <= eff_threshold)
+
+    barrel_keep = (u_region == 0) & valid_roll_mask & (~bad_eff_mask)
+    endcap_keep = (u_region != 0) & valid_roll_mask & (~irpc_mask) & (~bad_eff_mask)
+
+    n_bad = int(np.sum(bad_eff_mask))
+    n_irpc = int(np.sum(irpc_mask))
+    n_zero_den = int(np.sum(~valid_roll_mask))
+    n_barrel_keep = int(np.sum(barrel_keep))
+    n_endcap_keep = int(np.sum(endcap_keep))
+
+    print(
+        f"[info] year={spec.year}: zero-denominator rolls={n_zero_den}, "
+        f"remove eff<={eff_threshold:.1f}% rolls={n_bad}, "
+        f"iRPC rolls={n_irpc}, keep barrel={n_barrel_keep}, keep endcap={n_endcap_keep}",
+        flush=True,
+    )
+
+    roll_eff_by_region = {
+        "barrel": efficiency[barrel_keep],
+        "endcap": efficiency[endcap_keep],
+    }
+    eff_summary_by_region = {
+        "barrel": compute_efficiency_summary_from_efficiencies(
+            roll_eff_by_region["barrel"], eff_threshold
+        ),
+        "endcap": compute_efficiency_summary_from_efficiencies(
+            roll_eff_by_region["endcap"], eff_threshold
+        ),
+    }
+
+    print(f"[info] year={spec.year}: building fiducial+matched observable histograms", flush=True)
+
+    obs_mask = is_fiducial & is_matched
+    obs_inverse = inverse[obs_mask]
+    obs_cls = cls_values[obs_mask]
+    obs_bx = bx_values[obs_mask]
+
+    cls_hist_all, cls_sum_all, cls_count_all = histogram_by_group(
+        inverse=obs_inverse,
+        values=obs_cls,
+        n_groups=n_rolls,
+        value_min=CLS_MIN,
+        value_max=CLS_MAX,
+    )
+    bx_hist_all, bx_sum_all, bx_count_all = histogram_by_group(
+        inverse=obs_inverse,
+        values=obs_bx,
+        n_groups=n_rolls,
+        value_min=BX_MIN,
+        value_max=BX_MAX,
+    )
+
+    barrel_cls_hist = (
+        np.sum(cls_hist_all[barrel_keep], axis=0)
+        if np.any(barrel_keep)
+        else np.zeros(CLS_NBINS, dtype=np.float64)
+    )
+    endcap_cls_hist = (
+        np.sum(cls_hist_all[endcap_keep], axis=0)
+        if np.any(endcap_keep)
+        else np.zeros(CLS_NBINS, dtype=np.float64)
+    )
+
+    barrel_bx_hist = (
+        np.sum(bx_hist_all[barrel_keep], axis=0)
+        if np.any(barrel_keep)
+        else np.zeros(BX_NBINS, dtype=np.float64)
+    )
+    endcap_bx_hist = (
+        np.sum(bx_hist_all[endcap_keep], axis=0)
+        if np.any(endcap_keep)
+        else np.zeros(BX_NBINS, dtype=np.float64)
+    )
+
+    barrel_cls_sum = float(np.sum(cls_sum_all[barrel_keep])) if np.any(barrel_keep) else 0.0
+    endcap_cls_sum = float(np.sum(cls_sum_all[endcap_keep])) if np.any(endcap_keep) else 0.0
+
+    barrel_bx_sum = float(np.sum(bx_sum_all[barrel_keep])) if np.any(barrel_keep) else 0.0
+    endcap_bx_sum = float(np.sum(bx_sum_all[endcap_keep])) if np.any(endcap_keep) else 0.0
+
+    barrel_cls_count = int(np.sum(cls_count_all[barrel_keep])) if np.any(barrel_keep) else 0
+    endcap_cls_count = int(np.sum(cls_count_all[endcap_keep])) if np.any(endcap_keep) else 0
+
+    barrel_bx_count = int(np.sum(bx_count_all[barrel_keep])) if np.any(barrel_keep) else 0
+    endcap_bx_count = int(np.sum(bx_count_all[endcap_keep])) if np.any(endcap_keep) else 0
+
+    observable_summary_by_region = {
+        "barrel": {
+            "cls": RegionObservableSummary(
+                hist_counts=barrel_cls_hist,
+                mean_value=(barrel_cls_sum / barrel_cls_count) if barrel_cls_count > 0 else np.nan,
+            ),
+            "bx": RegionObservableSummary(
+                hist_counts=barrel_bx_hist,
+                mean_value=(barrel_bx_sum / barrel_bx_count) if barrel_bx_count > 0 else np.nan,
+            ),
+        },
+        "endcap": {
+            "cls": RegionObservableSummary(
+                hist_counts=endcap_cls_hist,
+                mean_value=(endcap_cls_sum / endcap_cls_count) if endcap_cls_count > 0 else np.nan,
+            ),
+            "bx": RegionObservableSummary(
+                hist_counts=endcap_bx_hist,
+                mean_value=(endcap_bx_sum / endcap_bx_count) if endcap_bx_count > 0 else np.nan,
+            ),
+        },
+    }
+
+    print(f"[info] year={spec.year}: summary completed", flush=True)
+
+    return DatasetSummary(
+        spec=spec,
+        roll_eff_by_region=roll_eff_by_region,
+        eff_summary_by_region=eff_summary_by_region,
+        observable_summary_by_region=observable_summary_by_region,
+    )
+
+
+def plot_roll_efficiency_distribution(
+    dataset_summaries: Sequence[DatasetSummary],
     output_dir: Path,
     cms_label: str,
     com_energy: float,
@@ -501,7 +628,10 @@ def plot_roll_efficiency_distribution(
     region_name: str,
     output_name: str,
     output_ext: str,
+    eff_threshold: float,
 ) -> Path:
+    print(f"[info] plotting {output_name}", flush=True)
+
     fig, ax = plt.subplots(figsize=(12, 8))
     add_common_style(ax=ax, cms_label=cms_label, com_energy=com_energy)
 
@@ -525,47 +655,31 @@ def plot_roll_efficiency_distribution(
     legend_labels: list[str] = []
 
     header_handle = Line2D([], [], linestyle="none", color="none")
-    header_label = f"{'':<18}{'Mean (>70%)':>10}{'% (≤70%)':>10}"
+    header_label = f"{'':<18}{f'Mean (>{eff_threshold:.0f}%)':>10}{f'% (≤{eff_threshold:.0f}%)':>10}"
     legend_handles.append(header_handle)
     legend_labels.append(header_label)
 
-    branches = list(ROLL_KEY_FIELDS) + ["is_matched"]
-
-    for idx, spec in enumerate(dataset_specs):
-        arrays = load_arrays(
-            path=spec.input_path,
-            tree_name=tree_name,
-            branches=branches,
-        )
-        excluded_roll_keys = load_excluded_roll_keys(spec.exclude_json)
-        roll_table = build_roll_efficiency_table(arrays)
-        eff = select_roll_efficiencies_from_table(
-            roll_table=roll_table,
-            excluded_roll_keys=excluded_roll_keys,
-            region_name=region_name,
-        )
-        counts, hist_edges = compute_histogram(eff, edges)
+    for idx, summary in enumerate(dataset_summaries):
+        spec = summary.spec
+        eff = summary.roll_eff_by_region[region_name]
+        counts, hist_edges = np.histogram(eff, bins=edges)
+        counts = counts.astype(np.float64)
+        hist_edges = hist_edges.astype(np.float64)
 
         if len(counts) > 0:
             max_count = max(max_count, float(np.max(counts)))
 
         color = DEFAULT_COLORS[idx % len(DEFAULT_COLORS)]
+        ax.stairs(counts, hist_edges, color=color, linewidth=2)
 
-        ax.stairs(
-            counts,
-            hist_edges,
-            color=color,
-            linewidth=2,
-        )
-
+        mean_good, frac_bad = summary.eff_summary_by_region[region_name]
         legend_handles.append(Line2D([], [], color=color, linewidth=2))
         legend_labels.append(
             build_efficiency_legend_row(
                 year=spec.year,
                 lumi=spec.lumi,
-                roll_table=roll_table,
-                excluded_roll_keys=excluded_roll_keys,
-                region_name=region_name,
+                mean_good=mean_good,
+                frac_bad=frac_bad,
             )
         )
 
@@ -589,12 +703,13 @@ def plot_roll_efficiency_distribution(
     output_path = output_dir / f"{output_name}.{output_ext}"
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
+
+    print(f"[done] saved: {output_path}", flush=True)
     return output_path
 
 
 def plot_trial_observable_distribution(
-    dataset_specs: Sequence[DatasetSpec],
-    tree_name: str,
+    dataset_summaries: Sequence[DatasetSummary],
     output_dir: Path,
     cms_label: str,
     com_energy: float,
@@ -608,6 +723,8 @@ def plot_trial_observable_distribution(
     x_ticks: Sequence[float] | None = None,
     log_scale: bool = False,
 ) -> Path:
+    print(f"[info] plotting {output_name}", flush=True)
+
     fig, ax = plt.subplots(figsize=(12, 8))
     add_common_style(ax=ax, cms_label=cms_label, com_energy=com_energy)
 
@@ -627,64 +744,52 @@ def plot_trial_observable_distribution(
     if x_ticks is not None:
         ax.set_xticks(list(x_ticks))
 
-    all_hists = []
+    all_hists: list[tuple[str, np.ndarray]] = []
     max_count = 0.0
 
-    branches = list(ROLL_KEY_FIELDS) + ["is_matched", branch_name]
-
-    for spec in dataset_specs:
-        arrays = load_arrays(
-            path=spec.input_path,
-            tree_name=tree_name,
-            branches=branches,
-        )
-        excluded_roll_keys = load_excluded_roll_keys(spec.exclude_json)
-
-        values = select_observable_values(
-            arrays=arrays,
-            excluded_roll_keys=excluded_roll_keys,
-            region_name=region_name,
-            branch_name=branch_name,
-            min_value=float(edges[0]),
-            max_value=float(edges[-1]),
-        )
-
-        mean_value = compute_mean(values)
-        counts, hist_edges = compute_histogram(values, edges)
+    for summary in dataset_summaries:
+        spec = summary.spec
+        obs = summary.observable_summary_by_region[region_name][branch_name]
+        counts = obs.hist_counts
+        mean_value = obs.mean_value
 
         if len(counts) > 0:
             max_count = max(max_count, float(np.max(counts)))
 
         label = build_stats_label(spec.year, spec.lumi, mean_value)
-        all_hists.append((label, counts, hist_edges))
+        all_hists.append((label, counts))
 
     if log_scale:
-        positive_counts = []
+        positive_counts: list[np.ndarray] = []
 
-        for idx, (label, counts, hist_edges) in enumerate(all_hists):
+        for idx, (label, counts) in enumerate(all_hists):
             draw_stairs_hist(
                 ax=ax,
                 counts=counts,
-                edges=hist_edges,
+                edges=edges,
                 color=DEFAULT_COLORS[idx % len(DEFAULT_COLORS)],
                 label=label,
             )
-            positive_counts.extend(counts[counts > 0.0])
+            positive = counts[counts > 0.0]
+            if len(positive) > 0:
+                positive_counts.append(positive)
 
-        style_log_y_axis(ax, np.asarray(positive_counts, dtype=np.float64))
+        merged_positive_counts = (
+            np.concatenate(positive_counts)
+            if len(positive_counts) > 0
+            else np.empty(0, dtype=np.float64)
+        )
+        style_log_y_axis(ax, merged_positive_counts)
 
     else:
-        if max_count > 0.0:
-            scale_exp = int(np.floor(np.log10(max_count)))
-        else:
-            scale_exp = 0
+        scale_exp = int(np.floor(np.log10(max_count))) if max_count > 0.0 else 0
         scale = 10.0 ** scale_exp
 
-        for idx, (label, counts, hist_edges) in enumerate(all_hists):
+        for idx, (label, counts) in enumerate(all_hists):
             draw_stairs_hist(
                 ax=ax,
                 counts=counts / scale,
-                edges=hist_edges,
+                edges=edges,
                 color=DEFAULT_COLORS[idx % len(DEFAULT_COLORS)],
                 label=label,
             )
@@ -713,29 +818,9 @@ def plot_trial_observable_distribution(
     output_path = output_dir / f"{output_name}.{output_ext}"
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
+
+    print(f"[done] saved: {output_path}", flush=True)
     return output_path
-
-
-def build_dataset_specs(
-    input_paths: Sequence[Path],
-    years: Sequence[int],
-    lumis: Sequence[float] | None,
-    exclude_jsons: Sequence[Path],
-) -> list[DatasetSpec]:
-    specs = []
-
-    for idx, input_path in enumerate(input_paths):
-        lumi = None if lumis is None or len(lumis) == 0 else lumis[idx]
-        specs.append(
-            DatasetSpec(
-                year=years[idx],
-                lumi=lumi,
-                input_path=input_path,
-                exclude_json=exclude_jsons[idx],
-            )
-        )
-
-    return specs
 
 
 def main() -> None:
@@ -744,25 +829,44 @@ def main() -> None:
     input_paths = list(args.inputs)
     years = list(args.years)
     lumis = None if args.lumis is None else list(args.lumis)
-    exclude_jsons = list(args.exclude_jsons)
 
     dataset_specs = build_dataset_specs(
         input_paths=input_paths,
         years=years,
         lumis=lumis,
-        exclude_jsons=exclude_jsons,
     )
 
     cls_edges = np.arange(0.5, 10.5 + 1.0, 1.0)
     bx_edges = np.arange(-4.5, 4.5 + 1.0, 1.0)
 
-    output_paths = []
+    print("[info] start processing datasets", flush=True)
 
-    for region_name in ("barrel", "endcap"):
-        output_paths.append(
+    dataset_summaries: list[DatasetSummary] = []
+    for spec in dataset_specs:
+        print(f"[info] start year={spec.year}", flush=True)
+        summary = summarize_dataset(
+            spec=spec,
+            tree_name=args.tree_name,
+            eff_threshold=args.eff_threshold,
+        )
+        dataset_summaries.append(summary)
+        print(f"[info] finished year={spec.year}", flush=True)
+
+    print("[info] start plotting", flush=True)
+
+    plot_jobs = [
+        ("barrel", "roll_efficiency"),
+        ("barrel", "cluster_size"),
+        ("barrel", "bx"),
+        ("endcap", "roll_efficiency"),
+        ("endcap", "cluster_size"),
+        ("endcap", "bx"),
+    ]
+
+    for region_name, plot_kind in plot_jobs:
+        if plot_kind == "roll_efficiency":
             plot_roll_efficiency_distribution(
-                dataset_specs=dataset_specs,
-                tree_name=args.tree_name,
+                dataset_summaries=dataset_summaries,
                 output_dir=args.output,
                 cms_label=args.label,
                 com_energy=args.com,
@@ -772,13 +876,12 @@ def main() -> None:
                 region_name=region_name,
                 output_name=f"{args.name_prefix}-roll-efficiency-{region_name}",
                 output_ext=args.ext,
+                eff_threshold=args.eff_threshold,
             )
-        )
 
-        output_paths.append(
+        elif plot_kind == "cluster_size":
             plot_trial_observable_distribution(
-                dataset_specs=dataset_specs,
-                tree_name=args.tree_name,
+                dataset_summaries=dataset_summaries,
                 output_dir=args.output,
                 cms_label=args.label,
                 com_energy=args.com,
@@ -786,18 +889,16 @@ def main() -> None:
                 branch_name="cls",
                 edges=cls_edges,
                 x_label="Cluster Size",
-                y_label="# Matched Trials",
+                y_label="# Fiducial Matched Trials",
                 output_name=f"{args.name_prefix}-cluster-size-{region_name}",
                 output_ext=args.ext,
                 x_ticks=np.arange(1, 11, 1),
                 log_scale=False,
             )
-        )
 
-        output_paths.append(
+        elif plot_kind == "bx":
             plot_trial_observable_distribution(
-                dataset_specs=dataset_specs,
-                tree_name=args.tree_name,
+                dataset_summaries=dataset_summaries,
                 output_dir=args.output,
                 cms_label=args.label,
                 com_energy=args.com,
@@ -805,16 +906,17 @@ def main() -> None:
                 branch_name="bx",
                 edges=bx_edges,
                 x_label="Bunch Crossing",
-                y_label="# Matched Trials",
+                y_label="# Fiducial Matched Trials",
                 output_name=f"{args.name_prefix}-bx-{region_name}",
                 output_ext=args.ext,
                 x_ticks=np.arange(-4, 5, 1),
                 log_scale=True,
             )
-        )
 
-    for output_path in output_paths:
-        print(f"[done] saved: {output_path}", flush=True)
+        else:
+            raise RuntimeError(f"Unknown plot kind: {plot_kind}")
+
+    print("[done] all plots completed", flush=True)
 
 
 if __name__ == "__main__":

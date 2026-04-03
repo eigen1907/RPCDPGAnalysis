@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -12,9 +13,6 @@ import matplotlib as mpl
 mpl.use("agg")
 import matplotlib.pyplot as plt
 import mplhep as mh
-
-from hist import Hist
-from hist.axis import Regular
 
 
 mh.style.use(mh.styles.CMS)
@@ -28,15 +26,18 @@ DEFAULT_COLORS = [
 ]
 
 DEFAULT_HATCHES = [
-    #"\\",
-    #"/",
-    #"+",
-    #".",
     None,
     None,
     None,
     None,
 ]
+
+
+@dataclass(frozen=True)
+class DatasetSpec:
+    input_path: Path
+    year: int
+    lumi: float | None
 
 
 def parse_args() -> argparse.Namespace:
@@ -214,6 +215,24 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def build_dataset_specs(
+    input_paths: Sequence[Path],
+    years: Sequence[int],
+    lumis: Sequence[float] | None,
+) -> list[DatasetSpec]:
+    specs = []
+    for idx, input_path in enumerate(input_paths):
+        lumi = None if lumis is None or len(lumis) == 0 else lumis[idx]
+        specs.append(
+            DatasetSpec(
+                input_path=input_path,
+                year=years[idx],
+                lumi=lumi,
+            )
+        )
+    return specs
+
+
 def build_legend_label(year: int, lumi: float | None) -> str:
     if lumi is None:
         return rf"$%d$" % year
@@ -230,7 +249,7 @@ def load_tree_branch(
             raise RuntimeError(f"Missing tree '{tree_name}' in {path}")
 
         tree = root_file[tree_name]
-        keys = list(tree.keys())
+        keys = set(tree.keys())
         if branch_name not in keys:
             raise RuntimeError(f"Missing branch '{branch_name}' in {path}:{tree_name}")
 
@@ -239,6 +258,26 @@ def load_tree_branch(
     value = np.asarray(value, dtype=np.float64)
     value = value[np.isfinite(value)]
     return value
+
+
+def preload_branch_cache(
+    dataset_specs: Sequence[DatasetSpec],
+    requests: Sequence[tuple[str, str]],
+) -> dict[tuple[Path, str, str], np.ndarray]:
+    cache: dict[tuple[Path, str, str], np.ndarray] = {}
+
+    for spec in dataset_specs:
+        for tree_name, branch_name in requests:
+            key = (spec.input_path, tree_name, branch_name)
+            if key in cache:
+                continue
+            cache[key] = load_tree_branch(
+                path=spec.input_path,
+                tree_name=tree_name,
+                branch_name=branch_name,
+            )
+
+    return cache
 
 
 def make_xlabel(branch_name: str) -> str:
@@ -252,22 +291,24 @@ def make_xlabel(branch_name: str) -> str:
 
 
 def make_ylabel(x_min: float, x_max: float, n_bins: int, branch_name: str) -> str:
-    bin_width = (x_max - x_min) / n_bins
+    _ = (x_min, x_max, n_bins, branch_name)
+    return r"Events"
 
-    if branch_name in ("dimuon_mass", "probe_pt"):
-        #return rf"Events / {bin_width:.1f} $\mathrm{{GeV}}$"
-        return rf"Events"
-    if branch_name == "probe_eta":
-        #return rf"Events / {bin_width:.2f}"
-        return rf"Events"
-    #return rf"Events / {bin_width:.3g}"
-    return rf"Events"
+
+def compute_histogram(
+    values: np.ndarray,
+    x_min: float,
+    x_max: float,
+    n_bins: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    edges = np.linspace(x_min, x_max, n_bins + 1, dtype=np.float64)
+    counts, edges = np.histogram(values, bins=edges)
+    return counts.astype(np.float64), edges.astype(np.float64)
 
 
 def plot_branch_distribution(
-    input_paths: Sequence[Path],
-    years: Sequence[int],
-    lumis: Sequence[float] | None,
+    dataset_specs: Sequence[DatasetSpec],
+    branch_cache: dict[tuple[Path, str, str], np.ndarray],
     output_dir: Path,
     cms_label: str,
     com_energy: float,
@@ -278,7 +319,7 @@ def plot_branch_distribution(
     n_bins: int,
     output_name: str,
     output_ext: str,
-):
+) -> Path:
     fig, ax = plt.subplots(figsize=(12, 8))
 
     mh.cms.label(
@@ -300,35 +341,25 @@ def plot_branch_distribution(
     all_hists = []
     max_count = 0.0
 
-    for idx, (input_path, year) in enumerate(zip(input_paths, years)):
-        lumi = None if lumis is None or len(lumis) == 0 else lumis[idx]
-        label = build_legend_label(year, lumi)
-
-        values = load_tree_branch(
-            path=input_path,
-            tree_name=tree_name,
-            branch_name=branch_name,
+    for idx, spec in enumerate(dataset_specs):
+        label = build_legend_label(spec.year, spec.lumi)
+        values = branch_cache[(spec.input_path, tree_name, branch_name)]
+        counts, edges = compute_histogram(
+            values=values,
+            x_min=x_min,
+            x_max=x_max,
+            n_bins=n_bins,
         )
-
-        hist_obj = Hist(Regular(n_bins, x_min, x_max))
-        hist_obj.fill(values)
-
-        counts = np.asarray(hist_obj.values(), dtype=np.float64)
-        edges = np.asarray(hist_obj.axes[0].edges, dtype=np.float64)
 
         if len(counts) > 0:
             max_count = max(max_count, float(np.max(counts)))
 
-        all_hists.append((year, label, counts, edges))
+        all_hists.append((idx, label, counts, edges))
 
-    if max_count > 0.0:
-        scale_exp = int(np.floor(np.log10(max_count)))
-    else:
-        scale_exp = 0
-
+    scale_exp = int(np.floor(np.log10(max_count))) if max_count > 0.0 else 0
     scale = 10.0 ** scale_exp
 
-    for idx, (_, label, counts, edges) in enumerate(all_hists):
+    for idx, label, counts, edges in all_hists:
         counts_scaled = counts / scale
 
         ax.stairs(
@@ -345,18 +376,19 @@ def plot_branch_distribution(
         make_ylabel(x_min, x_max, n_bins, branch_name),
         fontsize=22,
     )
-    
+
     if max_count > 0.0:
         y_margin = 1.35 if branch_name == "probe_eta" else 1.20
         ax.set_ylim(0.0, y_margin * max_count / scale)
 
-    ax.annotate(
-        rf"$x10^{scale_exp}$",
-        (-0.06, 1.0),
-        xycoords="axes fraction",
-        fontsize=18,
-        horizontalalignment="left",
-    )
+    if scale_exp != 0:
+        ax.annotate(
+            rf"$x10^{{{scale_exp}}}$",
+            (-0.06, 1.0),
+            xycoords="axes fraction",
+            fontsize=18,
+            horizontalalignment="left",
+        )
 
     ax.legend(fontsize=18, handleheight=1.2, loc="upper right")
 
@@ -375,13 +407,47 @@ def main() -> None:
     years = list(args.years)
     lumis = None if args.lumis is None else list(args.lumis)
 
+    dataset_specs = build_dataset_specs(
+        input_paths=input_paths,
+        years=years,
+        lumis=lumis,
+    )
+
+    probe_tree_name = args.probe_tree_name if args.probe_tree_name is not None else args.tree_name
+
+    branch_requests: list[tuple[str, str]] = [
+        (args.tree_name, args.branch),
+    ]
+
+    if args.plot_probe_pt:
+        branch_requests.append((probe_tree_name, args.probe_pt_branch))
+
+    if args.plot_probe_eta:
+        branch_requests.append((probe_tree_name, args.probe_eta_branch))
+
+    branch_cache = preload_branch_cache(
+        dataset_specs=dataset_specs,
+        requests=branch_requests,
+    )
+
+    print("[info] total number of probes", flush=True)
+    total_probes_all = 0
+    for spec in dataset_specs:
+        values = branch_cache[(spec.input_path, args.tree_name, args.branch)]
+        n_probes = len(values)
+        total_probes_all += n_probes
+        print(
+            f"  year={spec.year}  file={spec.input_path}  n_probes={n_probes}",
+            flush=True,
+        )
+    print(f"[info] total probes (all inputs) = {total_probes_all}", flush=True)
+
     output_paths = []
 
     output_paths.append(
         plot_branch_distribution(
-            input_paths=input_paths,
-            years=years,
-            lumis=lumis,
+            dataset_specs=dataset_specs,
+            branch_cache=branch_cache,
             output_dir=args.output,
             cms_label=args.label,
             com_energy=args.com,
@@ -395,14 +461,11 @@ def main() -> None:
         )
     )
 
-    probe_tree_name = args.probe_tree_name if args.probe_tree_name is not None else args.tree_name
-
     if args.plot_probe_pt:
         output_paths.append(
             plot_branch_distribution(
-                input_paths=input_paths,
-                years=years,
-                lumis=lumis,
+                dataset_specs=dataset_specs,
+                branch_cache=branch_cache,
                 output_dir=args.output,
                 cms_label=args.label,
                 com_energy=args.com,
@@ -419,9 +482,8 @@ def main() -> None:
     if args.plot_probe_eta:
         output_paths.append(
             plot_branch_distribution(
-                input_paths=input_paths,
-                years=years,
-                lumis=lumis,
+                dataset_specs=dataset_specs,
+                branch_cache=branch_cache,
                 output_dir=args.output,
                 cms_label=args.label,
                 com_energy=args.com,
