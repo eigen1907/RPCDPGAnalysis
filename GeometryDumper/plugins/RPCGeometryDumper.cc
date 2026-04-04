@@ -18,6 +18,8 @@
 #include "DataFormats/GeometrySurface/interface/TrapezoidalPlaneBounds.h"
 #include "TrackingTools/GeomPropagators/interface/StraightLinePlaneCrossing.h"
 
+#include "DataFormats/MuonDetId/interface/RPCDetId.h"
+
 #include <iostream>
 #include <fstream>
 
@@ -38,16 +40,17 @@ private:
 
   edm::ESGetToken<RPCGeometry, MuonGeometryRecord> rpcGeomToken_;
   const std::string outputFileName_;
-    
-  const std::string header_ = "roll_name,det_id,area,is_front,x1,y1,z1,x2,y2,z2,x3,y3,z3,x4,y4,z4";
-  const char delimeter_ = ',';
+
+  const std::string header_ =
+      "roll_name,region,ring,station,sector,layer,subsector,roll,rawId,area,"
+      "x1,y1,z1,x2,y2,z2,x3,y3,z3,x4,y4,z4";
+  const char delimiter_ = ',';
 };
 
-RPCGeometryDumper::RPCGeometryDumper(const edm::ParameterSet& iConfig):
-  rpcGeomToken_(esConsumes<edm::Transition::BeginRun>()), 
-  outputFileName_(iConfig.getUntrackedParameter<std::string>("outputFileName"))
+RPCGeometryDumper::RPCGeometryDumper(const edm::ParameterSet& iConfig)
+    : rpcGeomToken_(esConsumes<edm::Transition::BeginRun>()),
+      outputFileName_(iConfig.getUntrackedParameter<std::string>("outputFileName"))
 {}
-
 
 void RPCGeometryDumper::fillDescriptions(edm::ConfigurationDescriptions& descriptions)
 {
@@ -56,51 +59,33 @@ void RPCGeometryDumper::fillDescriptions(edm::ConfigurationDescriptions& descrip
   descriptions.addWithDefaultLabel(desc);
 }
 
-
 void RPCGeometryDumper::beginRun(const edm::Run&, const edm::EventSetup& iSetup)
 {
   const auto& rpcGeom = iSetup.getData(rpcGeomToken_);
 
   std::ofstream fout(outputFileName_);
   fout << header_ << std::endl;
-  
-  for ( const RPCRoll* roll : rpcGeom.rolls() )
-  {
-    const auto detId = roll->id();
-    const string rollName = RPCGeomServ(detId).name();
 
-    bool isFront = false;
-    
-    if (detId.ring() == 1) {
-      isFront = true;
-    } else if (detId.station() == 1) {
-      isFront = (RPCGeomServ(detId).segment() % 2 == 0);
-    } else {
-      isFront = (RPCGeomServ(detId).segment() % 2 != 0);
-    }
-    //if (detId.ring() == 1) {
-    //  isFront = true;
-    //} else {
-    //  // 10 degree rings have odd subsectors in front
-    //  isFront = (detId.subsector() % 2 == 0);
-    //}    
-    
-    //if (detId.ring() == 1 && detId.station()) 
-    //{
-    //  isFront = (detId.subsector() != 2);
-    //  if (detId.sector() % 2 == 0) isFront = !isFront;
-    //} 
-    //else 
-    //{
-    //  isFront = (detId.subsector() % 2 == 0);
-    //}
+  for (const RPCRoll* roll : rpcGeom.rolls())
+  {
+    const RPCDetId detId = roll->id();
+    const string roll_name = RPCGeomServ(detId).name();
+
+    const int region    = detId.region();
+    const int ring      = detId.ring();
+    const int station   = detId.station();
+    const int sector    = detId.sector();
+    const int layer     = detId.layer();
+    const int subsector = detId.subsector();
+    const int roll_num   = detId.roll();
 
     const auto& bound = roll->surface().bounds();
     const float h = bound.length();
     const float w12 = bound.width();
     float w34;
     float area;
-    if ( roll->isBarrel() )
+
+    if (roll->isBarrel())
     {
       w34 = w12;
       area = w12 * h;
@@ -116,21 +101,27 @@ void RPCGeometryDumper::beginRun(const edm::Run&, const edm::EventSetup& iSetup)
     const auto gp3 = roll->toGlobal(LocalPoint(+w34 / 2, -h / 2, 0.f));
     const auto gp4 = roll->toGlobal(LocalPoint(-w34 / 2, -h / 2, 0.f));
 
-    fout << rollName        << delimeter_
-         << detId.rawId()   << delimeter_
-         << area            << delimeter_
-         << isFront         << delimeter_
-         << gp1.x()         << delimeter_
-         << gp1.y()         << delimeter_
-         << gp1.z()         << delimeter_
-         << gp2.x()         << delimeter_
-         << gp2.y()         << delimeter_
-         << gp2.z()         << delimeter_
-         << gp3.x()         << delimeter_
-         << gp3.y()         << delimeter_
-         << gp3.z()         << delimeter_
-         << gp4.x()         << delimeter_
-         << gp4.y()         << delimeter_
+    fout << roll_name        << delimiter_
+         << region          << delimiter_
+         << ring            << delimiter_
+         << station         << delimiter_
+         << sector          << delimiter_
+         << layer           << delimiter_
+         << subsector       << delimiter_
+         << roll_num        << delimiter_
+         << detId.rawId()   << delimiter_
+         << area            << delimiter_
+         << gp1.x()         << delimiter_
+         << gp1.y()         << delimiter_
+         << gp1.z()         << delimiter_
+         << gp2.x()         << delimiter_
+         << gp2.y()         << delimiter_
+         << gp2.z()         << delimiter_
+         << gp3.x()         << delimiter_
+         << gp3.y()         << delimiter_
+         << gp3.z()         << delimiter_
+         << gp4.x()         << delimiter_
+         << gp4.y()         << delimiter_
          << gp4.z()         << std::endl;
   }
 }
