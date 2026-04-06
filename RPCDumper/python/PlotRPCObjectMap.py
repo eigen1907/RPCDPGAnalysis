@@ -53,7 +53,8 @@ def detector_unit(region: int, station: int, layer: int) -> str:
 def resolve_input_files(path: Path) -> list[Path]:
     if path.is_file():
         return [path]
-    files = sorted(path.rglob("*.root"))
+
+    files = sorted(each for each in path.rglob("*.root") if each.is_file())
     if not files:
         raise FileNotFoundError(f"No ROOT files found under: {path}")
     return files
@@ -100,6 +101,72 @@ def group_rolls_by_unit(rolls: list[RPCRoll]) -> dict[str, list[RPCRoll]]:
     return out
 
 
+def make_roll_key_arrays(
+    region: np.ndarray,
+    ring: np.ndarray,
+    station: np.ndarray,
+    sector: np.ndarray,
+    layer: np.ndarray,
+    subsector: np.ndarray,
+    roll: np.ndarray,
+) -> np.ndarray:
+    return np.rec.fromarrays(
+        [
+            region.astype(np.int32),
+            ring.astype(np.int32),
+            station.astype(np.int32),
+            sector.astype(np.int32),
+            layer.astype(np.int32),
+            subsector.astype(np.int32),
+            roll.astype(np.int32),
+        ],
+        names=[
+            "region",
+            "ring",
+            "station",
+            "sector",
+            "layer",
+            "subsector",
+            "roll",
+        ],
+    )
+
+
+def roll_key_to_tuple(key) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        int(key["region"]),
+        int(key["ring"]),
+        int(key["station"]),
+        int(key["sector"]),
+        int(key["layer"]),
+        int(key["subsector"]),
+        int(key["roll"]),
+    )
+
+
+def build_roll_phi_center_map(
+    rolls: list[RPCRoll],
+) -> dict[tuple[int, int, int, int, int, int, int], float]:
+    out: dict[tuple[int, int, int, int, int, int, int], float] = {}
+
+    for each in rolls:
+        key = (
+            int(each.id.region),
+            int(each.id.ring),
+            int(each.id.station),
+            int(each.id.sector),
+            int(each.id.layer),
+            int(each.id.subsector),
+            int(each.id.roll),
+        )
+
+        if each.id.barrel:
+            phi_center = float(np.mean(each.phi))
+            out[key] = phi_center
+
+    return out
+
+
 def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
     branches = [
         "region",
@@ -131,6 +198,10 @@ def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
         empty_f = np.asarray([], dtype=np.float64)
         empty_i = np.asarray([], dtype=np.int32)
         empty_o = np.asarray([], dtype=object)
+        empty_key = np.rec.fromarrays(
+            [empty_i, empty_i, empty_i, empty_i, empty_i, empty_i, empty_i],
+            names=["region", "ring", "station", "sector", "layer", "subsector", "roll"],
+        )
         return {
             "unit": empty_o,
             "global_x": empty_f,
@@ -143,17 +214,32 @@ def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
             "layer": empty_i,
             "subsector": empty_i,
             "roll": empty_i,
+            "roll_key": empty_key,
         }
 
     out = {name: np.concatenate(parts[name]) for name in branches}
 
     region = out["region"].astype(np.int32)
+    ring = out["ring"].astype(np.int32)
     station = out["station"].astype(np.int32)
+    sector = out["sector"].astype(np.int32)
     layer = out["layer"].astype(np.int32)
+    subsector = out["subsector"].astype(np.int32)
+    roll = out["roll"].astype(np.int32)
 
     unit = np.asarray(
         [detector_unit(int(r), int(s), int(l)) for r, s, l in zip(region, station, layer)],
         dtype=object,
+    )
+
+    roll_key = make_roll_key_arrays(
+        region=region,
+        ring=ring,
+        station=station,
+        sector=sector,
+        layer=layer,
+        subsector=subsector,
+        roll=roll,
     )
 
     return {
@@ -162,21 +248,50 @@ def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
         "global_y": out["global_y"].astype(np.float64),
         "global_z": out["global_z"].astype(np.float64),
         "region": region,
-        "ring": out["ring"].astype(np.int32),
+        "ring": ring,
         "station": station,
-        "sector": out["sector"].astype(np.int32),
+        "sector": sector,
         "layer": layer,
-        "subsector": out["subsector"].astype(np.int32),
-        "roll": out["roll"].astype(np.int32),
+        "subsector": subsector,
+        "roll": roll,
+        "roll_key": roll_key,
     }
 
 
-def barrel_phi(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+def wrap_phi_to_reference(phi: np.ndarray, phi_ref: float) -> np.ndarray:
+    wrapped = phi.copy()
+    delta = wrapped - phi_ref
+    wrapped[delta > np.pi] -= 2.0 * np.pi
+    wrapped[delta < -np.pi] += 2.0 * np.pi
+    return wrapped
+
+
+def compute_barrel_phi_from_rolls(
+    x: np.ndarray,
+    y: np.ndarray,
+    roll_keys: np.ndarray,
+    phi_center_map: dict[tuple[int, int, int, int, int, int, int], float],
+) -> np.ndarray:
     phi = np.arctan2(y, x)
     phi[phi < 0] += 2.0 * np.pi
-    if len(phi) >= 3 and abs(phi[0] - phi[2]) > np.pi:
-        phi[phi > np.pi] -= 2.0 * np.pi
-    return phi
+
+    if len(phi) == 0:
+        return phi
+
+    out = phi.copy()
+    unique_keys, inverse = np.unique(roll_keys, return_inverse=True)
+
+    for idx, key in enumerate(unique_keys):
+        key_tuple = roll_key_to_tuple(key)
+        phi_ref = phi_center_map.get(key_tuple)
+
+        if phi_ref is None:
+            continue
+
+        mask = inverse == idx
+        out[mask] = wrap_phi_to_reference(out[mask], phi_ref)
+
+    return out
 
 
 def project_points(
@@ -184,9 +299,21 @@ def project_points(
     x: np.ndarray,
     y: np.ndarray,
     z: np.ndarray,
+    roll_keys: np.ndarray | None = None,
+    phi_center_map: dict[tuple[int, int, int, int, int, int, int], float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     if is_barrel:
-        return z, barrel_phi(x, y)
+        if roll_keys is None or phi_center_map is None:
+            raise ValueError("roll_keys and phi_center_map are required for barrel projection")
+
+        phi = compute_barrel_phi_from_rolls(
+            x=x,
+            y=y,
+            roll_keys=roll_keys,
+            phi_center_map=phi_center_map,
+        )
+        return z, phi
+
     return x, y
 
 
@@ -217,24 +344,25 @@ def run_geometry_plotting(
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rolls_by_unit = group_rolls_by_unit(load_geometry(geom_path))
+    rolls = load_geometry(geom_path)
+    rolls_by_unit = group_rolls_by_unit(rolls)
 
-    for unit, rolls in rolls_by_unit.items():
+    for unit, each_rolls in rolls_by_unit.items():
         fig, ax = plt.subplots(figsize=(12, 9))
-        draw_geometry(ax, rolls)
+        draw_geometry(ax, each_rolls)
 
         ax.annotate(
             unit,
-            (0.05, 0.93),
+            (0.05, 0.925),
             xycoords="axes fraction",
             va="top",
             ha="left",
-            fontsize=12,
+            fontsize=20,
             weight="bold",
         )
 
         mh.cms.label(ax=ax, llabel=label, lumi=lumi, year=year, com=com)
-        fig.savefig(output_dir / f"{unit}.png", dpi=150)
+        fig.savefig(output_dir / f"{unit}.png")
         plt.close(fig)
 
 
@@ -250,7 +378,10 @@ def run_scatter_plotting(
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rolls_by_unit = group_rolls_by_unit(load_geometry(geom_path))
+    all_rolls = load_geometry(geom_path)
+    rolls_by_unit = group_rolls_by_unit(all_rolls)
+    phi_center_map = build_roll_phi_center_map(all_rolls)
+
     points_by_tree = {
         spec.tree_name: load_points(input_path, spec.tree_name)
         for spec in tree_specs
@@ -277,10 +408,12 @@ def run_scatter_plotting(
                 continue
 
             xp, yp = project_points(
-                is_barrel,
-                arr["global_x"][mask],
-                arr["global_y"][mask],
-                arr["global_z"][mask],
+                is_barrel=is_barrel,
+                x=arr["global_x"][mask],
+                y=arr["global_y"][mask],
+                z=arr["global_z"][mask],
+                roll_keys=arr["roll_key"][mask],
+                phi_center_map=phi_center_map if is_barrel else None,
             )
 
             ax.scatter(
@@ -295,16 +428,16 @@ def run_scatter_plotting(
 
         ax.annotate(
             unit,
-            (0.05, 0.93),
+            (0.05, 0.925),
             xycoords="axes fraction",
             va="top",
             ha="left",
-            fontsize=12,
+            fontsize=20,
             weight="bold",
         )
 
         if drawn > 0:
-            ax.legend(loc="upper right", fontsize=11, frameon=True)
+            ax.legend(loc="upper right", fontsize=18, frameon=True)
 
         mh.cms.label(ax=ax, llabel=label, lumi=lumi, year=year, com=com)
         fig.savefig(output_dir / f"{unit}.png", dpi=150)

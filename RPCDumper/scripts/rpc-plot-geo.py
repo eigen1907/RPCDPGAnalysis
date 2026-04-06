@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("-g", "--geom", type=Path, default=data / "sample-geo.csv")
+    parser.add_argument("-g", "--geom", type=Path, default=data / "geometry.csv")
     parser.add_argument("-o", "--output", type=Path, default=pkg / "plots" / "geometry")
     parser.add_argument("--label", type=str, default="Phase2 Simulation Private Work")
     parser.add_argument("--year", type=str, default="")

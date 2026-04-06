@@ -12,7 +12,7 @@ process.maxEvents = cms.untracked.PSet(
 process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(1) )
 
 process.RPCGeometryDumper = cms.EDAnalyzer("RPCGeometryDumper",
-    outputFileName = cms.untracked.string("Run4D125.csv"),
+    outputFileName = cms.untracked.string("geometry.csv"),
 )
 
 process.p = cms.Path(process.RPCGeometryDumper)

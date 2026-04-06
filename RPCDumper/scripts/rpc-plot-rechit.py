@@ -25,8 +25,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("-i", "--input", type=Path, default=data / "sample-rechit.root")
-    parser.add_argument("-g", "--geom", type=Path, default=data / "sample-geo.csv")
+    parser.add_argument("-i", "--input", type=Path, default=data / "rechits.root")
+    parser.add_argument("-g", "--geom", type=Path, default=data / "geometry.csv")
     parser.add_argument("-o", "--output", type=Path, default=pkg / "plots" / "rechit")
     parser.add_argument("--label", type=str, default="Phase2 Simulation Private Work")
     parser.add_argument("--year", type=str, default="")
@@ -52,9 +52,9 @@ def main() -> None:
             TreeSpec(
                 tree_name="rpcRecHitTree",
                 label="RPCRecHit",
-                marker=".",
-                size=5.0,
-                alpha=0.75,
+                marker="o",
+                size=18.0,
+                alpha=0.90,
             )
         )
 
@@ -64,8 +64,8 @@ def main() -> None:
                 tree_name="rpcRecHitPhase2Tree",
                 label="RPCRecHitPhase2",
                 marker="x",
-                size=10.0,
-                alpha=0.80,
+                size=18.0,
+                alpha=0.90,
             )
         )
 
