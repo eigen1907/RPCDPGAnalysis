@@ -162,7 +162,7 @@ void RPCRecHitDumper::fillDescriptions(edm::ConfigurationDescriptions& descripti
   desc.add<edm::InputTag>("rpcRecHitTag", edm::InputTag("rpcRecHits"));
 
   desc.add<bool>("dumpRPCRecHitPhase2", false);
-  desc.add<edm::InputTag>("rpcRecHitPhase2Tag", edm::InputTag("rpcRecHitsPhase2"));
+  desc.add<edm::InputTag>("rpcRecHitPhase2Tag", edm::InputTag("rpcRecHitPhase2"));
 
   descriptions.add("RPCRecHitDumper", desc);
 }

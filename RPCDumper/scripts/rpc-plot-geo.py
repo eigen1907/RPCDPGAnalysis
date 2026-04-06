@@ -17,18 +17,22 @@ def parse_args() -> argparse.Namespace:
     pkg = get_pkg_dir()
     data = pkg / "data"
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--geom", type=Path, default=data / "sample-geo.csv")
-    parser.add_argument("--output", type=Path, default=pkg / "plots" / "geometry")
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("-g", "--geom", type=Path, default=data / "sample-geo.csv")
+    parser.add_argument("-o", "--output", type=Path, default=pkg / "plots" / "geometry")
     parser.add_argument("--label", type=str, default="Phase2 Simulation Private Work")
     parser.add_argument("--year", type=str, default="")
     parser.add_argument("--com", type=float, default=14)
     parser.add_argument("--lumi", type=float, default=None)
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
     run_geometry_plotting(
         geom_path=args.geom,
         output_dir=args.output,

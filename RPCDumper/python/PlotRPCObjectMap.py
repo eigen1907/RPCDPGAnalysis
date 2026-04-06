@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -11,7 +9,6 @@ import uproot
 
 import matplotlib as mpl
 mpl.use("agg")
-
 import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
 import mplhep as mh
@@ -22,281 +19,223 @@ from RPCDPGAnalysis.NanoAODTnP.RPCGeomServ import RPCRoll  # type: ignore
 mh.style.use(mh.styles.CMS)
 
 
-SUPPORTED_TREES = [
+RECHIT_TREES = [
     "rpcRecHitTree",
     "rpcRecHitPhase2Tree",
+]
+
+DIGI_TREES = [
     "rpcDigiTree",
     "rpcDigiPhase2Tree",
     "irpcDigiTree",
 ]
+
+SUPPORTED_TREES = RECHIT_TREES + DIGI_TREES
 
 
 @dataclass(frozen=True)
 class TreeSpec:
     tree_name: str
     label: str
-    marker: str = "."
-    size: float = 4.0
-    alpha: float = 1.0
+    marker: str
+    size: float
+    alpha: float
 
 
-def _resolve_input_files(input_path: Path) -> list[Path]:
-    if input_path.is_file():
-        return [input_path]
-    return sorted(input_path.rglob("*.root"))
+def detector_unit(region: int, station: int, layer: int) -> str:
+    if region == 0:
+        if station <= 2:
+            return f"RB{station}{'in' if layer == 1 else 'out'}"
+        return f"RB{station}"
+    return f"RE{region * station:+d}"
 
 
-def _strip_cycle(name: str) -> str:
-    return name.split(";")[0]
+def resolve_input_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    files = sorted(path.rglob("*.root"))
+    if not files:
+        raise FileNotFoundError(f"No ROOT files found under: {path}")
+    return files
 
 
-def _basename(name: str) -> str:
-    return _strip_cycle(name).split("/")[-1]
+def basename(key: str) -> str:
+    return key.split(";")[0].split("/")[-1]
 
 
-def get_available_trees(input_path: Path) -> list[str]:
-    input_file = _resolve_input_files(input_path)[0]
-
-    with uproot.open(input_file) as f:
-        names = []
-        for key, cls in f.classnames(recursive=True).items():
-            if "TTree" not in cls:
-                continue
-            name = _basename(key)
-            if name in SUPPORTED_TREES:
-                names.append(name)
-
-    return names
+def find_tree_path(file: Path, tree_name: str) -> str | None:
+    with uproot.open(file) as f:
+        for key in f.keys(recursive=True):
+            if basename(key) == tree_name:
+                return key.split(";")[0]
+    return None
 
 
-def _find_tree_path(input_file: Path, tree_name: str) -> str:
-    with uproot.open(input_file) as f:
-        for key, cls in f.classnames(recursive=True).items():
-            if "TTree" not in cls:
-                continue
-            path = _strip_cycle(key)
-            if _basename(path) == tree_name:
-                return path
+def get_available_trees(
+    input_path: Path,
+    allowed_trees: list[str] | None = None,
+) -> list[str]:
+    target_trees = SUPPORTED_TREES if allowed_trees is None else allowed_trees
+    found = set()
 
-    raise RuntimeError(f"Tree not found: {tree_name}")
+    for file in resolve_input_files(input_path):
+        with uproot.open(file) as f:
+            for key in f.keys(recursive=True):
+                name = basename(key)
+                if name in target_trees:
+                    found.add(name)
 
-
-def _to_string_array(values: np.ndarray) -> np.ndarray:
-    out = []
-    for value in values:
-        if isinstance(value, bytes):
-            out.append(value.decode())
-        else:
-            out.append(str(value))
-    return np.asarray(out, dtype=object)
+    return [name for name in target_trees if name in found]
 
 
 def load_geometry(geom_path: Path) -> list[RPCRoll]:
-    geom = pd.read_csv(geom_path)
-    return [RPCRoll.from_row(row) for _, row in geom.iterrows()]
+    df = pd.read_csv(geom_path)
+    return [RPCRoll.from_row(row) for _, row in df.iterrows()]
 
 
-def load_tree_points(
-    input_path: Path,
-    tree_name: str,
-) -> dict[str, np.ndarray]:
-    branches = ["roll_name", "global_x", "global_y", "global_z"]
-    out = {branch: [] for branch in branches}
-
-    for input_file in _resolve_input_files(input_path):
-        tree_path = _find_tree_path(input_file, tree_name)
-        with uproot.open(input_file) as f:
-            arrays = f[tree_path].arrays(branches, library="np")
-
-        for branch in branches:
-            out[branch].append(arrays[branch])
-
-    merged = {
-        branch: parts[0] if len(parts) == 1 else np.concatenate(parts, axis=0)
-        for branch, parts in out.items()
-    }
-
-    merged["roll_name"] = _to_string_array(merged["roll_name"])
-    merged["global_x"] = np.asarray(merged["global_x"], dtype=np.float64)
-    merged["global_y"] = np.asarray(merged["global_y"], dtype=np.float64)
-    merged["global_z"] = np.asarray(merged["global_z"], dtype=np.float64)
-
-    return merged
-
-
-def group_rolls_by_detector_unit(roll_list: list[RPCRoll]) -> dict[str, list[RPCRoll]]:
-    out: dict[str, list[RPCRoll]] = defaultdict(list)
-    for roll in roll_list:
-        out[roll.id.detector_unit].append(roll)
+def group_rolls_by_unit(rolls: list[RPCRoll]) -> dict[str, list[RPCRoll]]:
+    out: dict[str, list[RPCRoll]] = {}
+    for roll in rolls:
+        out.setdefault(roll.id.detector_unit, []).append(roll)
     return out
 
 
-def draw_geometry(
-    ax: plt.Axes,
-    patches: list,
-    facecolor: str = "0.96",
-    edgecolor: str = "black",
-    linewidth: float = 1.0,
-) -> None:
-    collection = PatchCollection(patches)
-    collection.set_facecolor(facecolor)
-    collection.set_edgecolor(edgecolor)
-    collection.set_linewidth(linewidth)
-    ax.add_collection(collection)
-    ax.autoscale_view()
+def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
+    branches = [
+        "region",
+        "ring",
+        "station",
+        "sector",
+        "layer",
+        "subsector",
+        "roll",
+        "global_x",
+        "global_y",
+        "global_z",
+    ]
+
+    parts: dict[str, list[np.ndarray]] = {name: [] for name in branches}
+
+    for file in resolve_input_files(input_path):
+        tree_path = find_tree_path(file, tree_name)
+        if tree_path is None:
+            continue
+
+        with uproot.open(file) as f:
+            arr = f[tree_path].arrays(branches, library="np")
+
+        for name in branches:
+            parts[name].append(arr[name])
+
+    if not parts["region"]:
+        empty_f = np.asarray([], dtype=np.float64)
+        empty_i = np.asarray([], dtype=np.int32)
+        empty_o = np.asarray([], dtype=object)
+        return {
+            "unit": empty_o,
+            "global_x": empty_f,
+            "global_y": empty_f,
+            "global_z": empty_f,
+            "region": empty_i,
+            "ring": empty_i,
+            "station": empty_i,
+            "sector": empty_i,
+            "layer": empty_i,
+            "subsector": empty_i,
+            "roll": empty_i,
+        }
+
+    out = {name: np.concatenate(parts[name]) for name in branches}
+
+    region = out["region"].astype(np.int32)
+    station = out["station"].astype(np.int32)
+    layer = out["layer"].astype(np.int32)
+
+    unit = np.asarray(
+        [detector_unit(int(r), int(s), int(l)) for r, s, l in zip(region, station, layer)],
+        dtype=object,
+    )
+
+    return {
+        "unit": unit,
+        "global_x": out["global_x"].astype(np.float64),
+        "global_y": out["global_y"].astype(np.float64),
+        "global_z": out["global_z"].astype(np.float64),
+        "region": region,
+        "ring": out["ring"].astype(np.int32),
+        "station": station,
+        "sector": out["sector"].astype(np.int32),
+        "layer": layer,
+        "subsector": out["subsector"].astype(np.int32),
+        "roll": out["roll"].astype(np.int32),
+    }
 
 
-def set_detector_axes(ax: plt.Axes, unit_rolls: list[RPCRoll]) -> None:
-    ax.set_xlabel(unit_rolls[0].polygon_xlabel)
-    ax.set_ylabel(unit_rolls[0].polygon_ylabel)
-    ax.set_ylim(None, unit_rolls[0].polygon_ymax)
+def barrel_phi(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    phi = np.arctan2(y, x)
+    phi[phi < 0] += 2.0 * np.pi
+    if len(phi) >= 3 and abs(phi[0] - phi[2]) > np.pi:
+        phi[phi > np.pi] -= 2.0 * np.pi
+    return phi
 
 
-def _is_barrel_unit(detector_unit: str) -> bool:
-    return detector_unit.startswith("W")
-
-
-def _project_points_for_unit(
-    detector_unit: str,
-    unit_rolls: list[RPCRoll],
-    global_x: np.ndarray,
-    global_y: np.ndarray,
-    global_z: np.ndarray,
+def project_points(
+    is_barrel: bool,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    if _is_barrel_unit(detector_unit):
-        x_plot = global_z
-        y_plot = np.arctan2(global_y, global_x)
-
-        ymax = float(unit_rolls[0].polygon_ymax)
-        if abs(ymax) > 10.0:
-            y_plot = np.degrees(y_plot)
-
-        return x_plot, y_plot
-
-    return global_x, global_y
+    if is_barrel:
+        return z, barrel_phi(x, y)
+    return x, y
 
 
-def plot_detector_geometry_map(
-    roll_list: list[RPCRoll],
-    output_dir: Path,
-    label: str,
-    year: Union[int, str],
-    com: float,
-    lumi: float | None,
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for detector_unit, unit_rolls in group_rolls_by_detector_unit(roll_list).items():
-        patches = [roll.polygon for roll in unit_rolls]
-
-        fig, ax = plt.subplots(figsize=(12, 9))
-        draw_geometry(ax, patches)
-        set_detector_axes(ax, unit_rolls)
-
-        ax.annotate(
-            f"{detector_unit}\nRolls: {len(unit_rolls)}",
-            (0.05, 0.93),
-            xycoords="axes fraction",
-            va="top",
-            ha="left",
-            fontsize=12,
-            weight="bold",
+def draw_geometry(ax: plt.Axes, rolls: list[RPCRoll]) -> None:
+    patches = [roll.polygon for roll in rolls]
+    ax.add_collection(
+        PatchCollection(
+            patches,
+            facecolor="0.96",
+            edgecolor="black",
+            linewidth=1.0,
         )
-
-        mh.cms.label(ax=ax, llabel=label, lumi=lumi, year=year, com=com)
-        fig.savefig(output_dir / f"{detector_unit}.png", dpi=150)
-        plt.close(fig)
-
-
-def plot_detector_scatter_overlay(
-    roll_list: list[RPCRoll],
-    tree_points: dict[str, dict[str, np.ndarray]],
-    tree_specs: list[TreeSpec],
-    output_dir: Path,
-    label: str,
-    year: Union[int, str],
-    com: float,
-    lumi: float | None,
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for detector_unit, unit_rolls in group_rolls_by_detector_unit(roll_list).items():
-        roll_names = {roll.id.name for roll in unit_rolls}
-        patches = [roll.polygon for roll in unit_rolls]
-
-        fig, ax = plt.subplots(figsize=(12, 9))
-        draw_geometry(ax, patches)
-        set_detector_axes(ax, unit_rolls)
-
-        n_drawn = 0
-
-        for spec in tree_specs:
-            arrays = tree_points[spec.tree_name]
-
-            mask = np.isin(arrays["roll_name"], list(roll_names))
-            mask = (
-                mask
-                & np.isfinite(arrays["global_x"])
-                & np.isfinite(arrays["global_y"])
-                & np.isfinite(arrays["global_z"])
-            )
-
-            if not np.any(mask):
-                continue
-
-            x_plot, y_plot = _project_points_for_unit(
-                detector_unit=detector_unit,
-                unit_rolls=unit_rolls,
-                global_x=arrays["global_x"][mask],
-                global_y=arrays["global_y"][mask],
-                global_z=arrays["global_z"][mask],
-            )
-
-            ax.scatter(
-                x_plot,
-                y_plot,
-                s=spec.size,
-                alpha=spec.alpha,
-                marker=spec.marker,
-                label=f"{spec.label} ({len(x_plot)})",
-            )
-            n_drawn += 1
-
-        ax.annotate(
-            detector_unit,
-            (0.05, 0.93),
-            xycoords="axes fraction",
-            va="top",
-            ha="left",
-            fontsize=12,
-            weight="bold",
-        )
-
-        if n_drawn > 0:
-            ax.legend(loc="upper right", fontsize=11, frameon=True)
-
-        mh.cms.label(ax=ax, llabel=label, lumi=lumi, year=year, com=com)
-        fig.savefig(output_dir / f"{detector_unit}.png", dpi=150)
-        plt.close(fig)
+    )
+    ax.autoscale_view()
+    ax.set_xlabel(rolls[0].polygon_xlabel)
+    ax.set_ylabel(rolls[0].polygon_ylabel)
+    if rolls[0].polygon_ymax is not None:
+        ax.set_ylim(None, rolls[0].polygon_ymax)
 
 
 def run_geometry_plotting(
     geom_path: Path,
     output_dir: Path,
     label: str = "Phase2 Simulation Private Work",
-    year: Union[int, str] = "",
+    year: str = "",
     com: float = 14,
     lumi: float | None = None,
 ) -> None:
-    roll_list = load_geometry(geom_path)
-    plot_detector_geometry_map(
-        roll_list=roll_list,
-        output_dir=output_dir,
-        label=label,
-        year=year,
-        com=com,
-        lumi=lumi,
-    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    rolls_by_unit = group_rolls_by_unit(load_geometry(geom_path))
+
+    for unit, rolls in rolls_by_unit.items():
+        fig, ax = plt.subplots(figsize=(12, 9))
+        draw_geometry(ax, rolls)
+
+        ax.annotate(
+            unit,
+            (0.05, 0.93),
+            xycoords="axes fraction",
+            va="top",
+            ha="left",
+            fontsize=12,
+            weight="bold",
+        )
+
+        mh.cms.label(ax=ax, llabel=label, lumi=lumi, year=year, com=com)
+        fig.savefig(output_dir / f"{unit}.png", dpi=150)
+        plt.close(fig)
 
 
 def run_scatter_plotting(
@@ -305,24 +244,68 @@ def run_scatter_plotting(
     output_dir: Path,
     tree_specs: list[TreeSpec],
     label: str = "Phase2 Simulation Private Work",
-    year: Union[int, str] = "",
+    year: str = "",
     com: float = 14,
     lumi: float | None = None,
 ) -> None:
-    roll_list = load_geometry(geom_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    tree_points = {
-        spec.tree_name: load_tree_points(input_path, spec.tree_name)
+    rolls_by_unit = group_rolls_by_unit(load_geometry(geom_path))
+    points_by_tree = {
+        spec.tree_name: load_points(input_path, spec.tree_name)
         for spec in tree_specs
     }
 
-    plot_detector_scatter_overlay(
-        roll_list=roll_list,
-        tree_points=tree_points,
-        tree_specs=tree_specs,
-        output_dir=output_dir,
-        label=label,
-        year=year,
-        com=com,
-        lumi=lumi,
-    )
+    for unit, rolls in rolls_by_unit.items():
+        fig, ax = plt.subplots(figsize=(12, 9))
+        draw_geometry(ax, rolls)
+
+        drawn = 0
+        is_barrel = unit.startswith("RB")
+
+        for spec in tree_specs:
+            arr = points_by_tree[spec.tree_name]
+
+            mask = (
+                (arr["unit"] == unit)
+                & np.isfinite(arr["global_x"])
+                & np.isfinite(arr["global_y"])
+                & np.isfinite(arr["global_z"])
+            )
+
+            if not np.any(mask):
+                continue
+
+            xp, yp = project_points(
+                is_barrel,
+                arr["global_x"][mask],
+                arr["global_y"][mask],
+                arr["global_z"][mask],
+            )
+
+            ax.scatter(
+                xp,
+                yp,
+                s=spec.size,
+                alpha=spec.alpha,
+                marker=spec.marker,
+                label=f"{spec.label} ({len(xp)})",
+            )
+            drawn += 1
+
+        ax.annotate(
+            unit,
+            (0.05, 0.93),
+            xycoords="axes fraction",
+            va="top",
+            ha="left",
+            fontsize=12,
+            weight="bold",
+        )
+
+        if drawn > 0:
+            ax.legend(loc="upper right", fontsize=11, frameon=True)
+
+        mh.cms.label(ax=ax, llabel=label, lumi=lumi, year=year, com=com)
+        fig.savefig(output_dir / f"{unit}.png", dpi=150)
+        plt.close(fig)
