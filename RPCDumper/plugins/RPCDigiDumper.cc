@@ -58,9 +58,9 @@ private:
 
   edm::ESGetToken<RPCGeometry, MuonGeometryRecord> rpcGeomToken_;
 
-  TTree* rpcDigiTree_;
-  TTree* irpcDigiTree_;
-  TTree* rpcDigiPhase2Tree_;
+  TTree* simMuonRPCDigisTree_;
+  TTree* simMuonIRPCDigisTree_;
+  TTree* simMuonRPCDigisPhase2Tree_;
 
   int run_;
   int lumi_;
@@ -127,9 +127,9 @@ RPCDigiDumper::RPCDigiDumper(const edm::ParameterSet& iConfig)
 
   edm::Service<TFileService> fs;
 
-  rpcDigiTree_ = nullptr;
-  irpcDigiTree_ = nullptr;
-  rpcDigiPhase2Tree_ = nullptr;
+  simMuonRPCDigisTree_ = nullptr;
+  simMuonIRPCDigisTree_ = nullptr;
+  simMuonRPCDigisPhase2Tree_ = nullptr;
 
   auto bookCommonBranches = [&](TTree* tree) {
     tree->Branch("run", &run_);
@@ -160,39 +160,39 @@ RPCDigiDumper::RPCDigiDumper(const edm::ParameterSet& iConfig)
   };
 
   if (dumpRPCDigi_) {
-    rpcDigiTree_ = fs->make<TTree>("rpcDigiTree", "RPCDigi global-position dump");
-    bookCommonBranches(rpcDigiTree_);
+    simMuonRPCDigisTree_ = fs->make<TTree>("simMuonRPCDigisTree", "RPCDigi global-position dump");
+    bookCommonBranches(simMuonRPCDigisTree_);
 
-    rpcDigiTree_->Branch("has_time", &has_time_);
-    rpcDigiTree_->Branch("has_x", &has_x_);
-    rpcDigiTree_->Branch("has_y", &has_y_);
-    rpcDigiTree_->Branch("is_pseudodigi", &is_pseudodigi_);
-    rpcDigiTree_->Branch("time", &time_);
-    rpcDigiTree_->Branch("coordinate_x", &coordinate_x_);
-    rpcDigiTree_->Branch("coordinate_y", &coordinate_y_);
-    rpcDigiTree_->Branch("delta_time", &delta_time_);
-    rpcDigiTree_->Branch("delta_x", &delta_x_);
-    rpcDigiTree_->Branch("delta_y", &delta_y_);
+    simMuonRPCDigisTree_->Branch("has_time", &has_time_);
+    simMuonRPCDigisTree_->Branch("has_x", &has_x_);
+    simMuonRPCDigisTree_->Branch("has_y", &has_y_);
+    simMuonRPCDigisTree_->Branch("is_pseudodigi", &is_pseudodigi_);
+    simMuonRPCDigisTree_->Branch("time", &time_);
+    simMuonRPCDigisTree_->Branch("coordinate_x", &coordinate_x_);
+    simMuonRPCDigisTree_->Branch("coordinate_y", &coordinate_y_);
+    simMuonRPCDigisTree_->Branch("delta_time", &delta_time_);
+    simMuonRPCDigisTree_->Branch("delta_x", &delta_x_);
+    simMuonRPCDigisTree_->Branch("delta_y", &delta_y_);
   }
 
   if (dumpIRPCDigi_) {
-    irpcDigiTree_ = fs->make<TTree>("irpcDigiTree", "IRPCDigi global-position dump");
-    bookCommonBranches(irpcDigiTree_);
+    simMuonIRPCDigisTree_ = fs->make<TTree>("simMuonIRPCDigisTree", "IRPCDigi global-position dump");
+    bookCommonBranches(simMuonIRPCDigisTree_);
 
-    irpcDigiTree_->Branch("bxLR", &bxLR_);
-    irpcDigiTree_->Branch("bxHR", &bxHR_);
-    irpcDigiTree_->Branch("sbx", &sbx_);
-    irpcDigiTree_->Branch("sbxLR", &sbxLR_);
-    irpcDigiTree_->Branch("sbxHR", &sbxHR_);
-    irpcDigiTree_->Branch("fineLR", &fineLR_);
-    irpcDigiTree_->Branch("fineHR", &fineHR_);
+    simMuonIRPCDigisTree_->Branch("bxLR", &bxLR_);
+    simMuonIRPCDigisTree_->Branch("bxHR", &bxHR_);
+    simMuonIRPCDigisTree_->Branch("sbx", &sbx_);
+    simMuonIRPCDigisTree_->Branch("sbxLR", &sbxLR_);
+    simMuonIRPCDigisTree_->Branch("sbxHR", &sbxHR_);
+    simMuonIRPCDigisTree_->Branch("fineLR", &fineLR_);
+    simMuonIRPCDigisTree_->Branch("fineHR", &fineHR_);
   }
 
   if (dumpRPCDigiPhase2_) {
-    rpcDigiPhase2Tree_ = fs->make<TTree>("rpcDigiPhase2Tree", "RPCDigiPhase2 global-position dump");
-    bookCommonBranches(rpcDigiPhase2Tree_);
+    simMuonRPCDigisPhase2Tree_ = fs->make<TTree>("simMuonRPCDigisPhase2Tree", "RPCDigiPhase2 global-position dump");
+    bookCommonBranches(simMuonRPCDigisPhase2Tree_);
 
-    rpcDigiPhase2Tree_->Branch("sbx", &sbx_);
+    simMuonRPCDigisPhase2Tree_->Branch("sbx", &sbx_);
   }
 }
 
@@ -294,7 +294,7 @@ void RPCDigiDumper::analyze(const edm::Event& iEvent, const edm::EventSetup& iSe
           delta_x_ = static_cast<float>(digi.deltaX());
           delta_y_ = static_cast<float>(digi.deltaY());
 
-          rpcDigiTree_->Fill();
+          simMuonRPCDigisTree_->Fill();
         }
       }
     }
@@ -331,7 +331,7 @@ void RPCDigiDumper::analyze(const edm::Event& iEvent, const edm::EventSetup& iSe
           fineLR_ = digi.fineLR();
           fineHR_ = digi.fineHR();
 
-          irpcDigiTree_->Fill();
+          simMuonIRPCDigisTree_->Fill();
         }
       }
     }
@@ -361,7 +361,7 @@ void RPCDigiDumper::analyze(const edm::Event& iEvent, const edm::EventSetup& iSe
           bx_ = digi.bx();
           sbx_ = digi.sbx();
 
-          rpcDigiPhase2Tree_->Fill();
+          simMuonRPCDigisPhase2Tree_->Fill();
         }
       }
     }

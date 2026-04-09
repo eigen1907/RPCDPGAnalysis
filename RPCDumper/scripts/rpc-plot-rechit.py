@@ -47,22 +47,22 @@ def main() -> None:
 
     tree_specs: list[TreeSpec] = []
 
-    if (not args.no_rechit) and ("rpcRecHitTree" in available):
+    if (not args.no_rechit) and ("rpcRecHitsTree" in available):
         tree_specs.append(
             TreeSpec(
-                tree_name="rpcRecHitTree",
-                label="RPCRecHit",
+                tree_name="rpcRecHitsTree",
+                label="rpcRecHits",
                 marker="o",
                 size=18.0,
                 alpha=0.90,
             )
         )
 
-    if (not args.no_rechit_phase2) and ("rpcRecHitPhase2Tree" in available):
+    if (not args.no_rechit_phase2) and ("rpcRecHitsPhase2Tree" in available):
         tree_specs.append(
             TreeSpec(
-                tree_name="rpcRecHitPhase2Tree",
-                label="RPCRecHitPhase2",
+                tree_name="rpcRecHitsPhase2Tree",
+                label="rpcRecHitsPhase2",
                 marker="x",
                 size=18.0,
                 alpha=0.90,

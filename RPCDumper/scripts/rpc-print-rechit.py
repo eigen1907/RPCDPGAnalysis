@@ -26,8 +26,8 @@ def main():
     ]
 
     tree_info = {
-        "rpcRecHitTree": "RPCRecHit",
-        "rpcRecHitPhase2Tree": "RPCRecHitPhase2",
+        "rpcRecHitsTree": "rpcRecHits",
+        "rpcRecHitsPhase2Tree": "rpcRecHitsPhase2",
     }
 
     data = {}

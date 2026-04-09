@@ -25,7 +25,7 @@ process.rpcRecHitDumper = cms.EDAnalyzer(
     rpcRecHitTag=cms.InputTag("rpcRecHits"),
 
     dumpRPCRecHitPhase2=cms.bool(True),
-    rpcRecHitPhase2Tag=cms.InputTag("rpcRecHitPhase2"),
+    rpcRecHitPhase2Tag=cms.InputTag("rpcRecHitsPhase2"),
 )
 
 process.p = cms.Path(process.rpcRecHitDumper)

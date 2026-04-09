@@ -26,9 +26,9 @@ def main():
     ]
 
     tree_info = {
-        "rpcDigiTree": "RPCDigi",
-        "rpcDigiPhase2Tree": "RPCDigiPhase2",
-        "irpcDigiTree": "IRPCDigi",
+        "simMuonRPCDigisTree": "simMuonRPCDigis",
+        "simMuonRPCDigisPhase2Tree": "simMuonRPCDigisPhase2",
+        "simMuonIRPCDigisTree": "simMuonIRPCDigis",
     }
 
     data = {}

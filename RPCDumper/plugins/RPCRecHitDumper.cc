@@ -21,8 +21,6 @@
 #include "DataFormats/MuonDetId/interface/RPCDetId.h"
 #include "DataFormats/RPCRecHit/interface/RPCRecHit.h"
 #include "DataFormats/RPCRecHit/interface/RPCRecHitCollection.h"
-#include "DataFormats/RPCRecHit/interface/RPCRecHitPhase2.h"
-#include "DataFormats/RPCRecHit/interface/RPCRecHitPhase2Collection.h"
 
 #include "TTree.h"
 
@@ -50,12 +48,12 @@ private:
   bool dumpRPCRecHitPhase2_;
 
   edm::EDGetTokenT<RPCRecHitCollection> rpcRecHitToken_;
-  edm::EDGetTokenT<RPCRecHitPhase2Collection> rpcRecHitPhase2Token_;
+  edm::EDGetTokenT<RPCRecHitCollection> rpcRecHitPhase2Token_;
 
   edm::ESGetToken<RPCGeometry, MuonGeometryRecord> rpcGeomToken_;
 
-  TTree* rpcRecHitTree_;
-  TTree* rpcRecHitPhase2Tree_;
+  TTree* rpcRecHitsTree_;
+  TTree* rpcRecHitsPhase2Tree_;
 
   int run_;
   int lumi_;
@@ -102,7 +100,7 @@ RPCRecHitDumper::RPCRecHitDumper(const edm::ParameterSet& iConfig)
   }
   if (dumpRPCRecHitPhase2_) {
     rpcRecHitPhase2Token_ =
-        consumes<RPCRecHitPhase2Collection>(iConfig.getParameter<edm::InputTag>("rpcRecHitPhase2Tag"));
+        consumes<RPCRecHitCollection>(iConfig.getParameter<edm::InputTag>("rpcRecHitPhase2Tag"));
   }
 
   edm::Service<TFileService> fs;
@@ -142,17 +140,17 @@ RPCRecHitDumper::RPCRecHitDumper(const edm::ParameterSet& iConfig)
     tree->Branch("local_err_yy", &local_err_yy_);
   };
 
-  rpcRecHitTree_ = nullptr;
-  rpcRecHitPhase2Tree_ = nullptr;
+  rpcRecHitsTree_ = nullptr;
+  rpcRecHitsPhase2Tree_ = nullptr;
 
   if (dumpRPCRecHit_) {
-    rpcRecHitTree_ = fs->make<TTree>("rpcRecHitTree", "RPCRecHit global-position dump");
-    bookCommonBranches(rpcRecHitTree_);
+    rpcRecHitsTree_ = fs->make<TTree>("rpcRecHitsTree", "RPCRecHit global-position dump");
+    bookCommonBranches(rpcRecHitsTree_);
   }
 
   if (dumpRPCRecHitPhase2_) {
-    rpcRecHitPhase2Tree_ = fs->make<TTree>("rpcRecHitPhase2Tree", "RPCRecHitPhase2 global-position dump");
-    bookCommonBranches(rpcRecHitPhase2Tree_);
+    rpcRecHitsPhase2Tree_ = fs->make<TTree>("rpcRecHitsPhase2Tree", "RPCRecHitPhase2 global-position dump");
+    bookCommonBranches(rpcRecHitsPhase2Tree_);
   }
 }
 
@@ -162,7 +160,7 @@ void RPCRecHitDumper::fillDescriptions(edm::ConfigurationDescriptions& descripti
   desc.add<edm::InputTag>("rpcRecHitTag", edm::InputTag("rpcRecHits"));
 
   desc.add<bool>("dumpRPCRecHitPhase2", false);
-  desc.add<edm::InputTag>("rpcRecHitPhase2Tag", edm::InputTag("rpcRecHitPhase2"));
+  desc.add<edm::InputTag>("rpcRecHitPhase2Tag", edm::InputTag("rpcRecHitsPhase2"));
 
   descriptions.add("RPCRecHitDumper", desc);
 }
@@ -235,16 +233,16 @@ void RPCRecHitDumper::analyze(const edm::Event& iEvent, const edm::EventSetup& i
         fillPointInfo(lp, gp);
         fillHitCommon(hit);
 
-        rpcRecHitTree_->Fill();
+        rpcRecHitsTree_->Fill();
       }
     }
   }
 
   if (dumpRPCRecHitPhase2_) {
-    edm::Handle<RPCRecHitPhase2Collection> hRecHitsP2;
+    edm::Handle<RPCRecHitCollection> hRecHitsP2;
     if (iEvent.getByToken(rpcRecHitPhase2Token_, hRecHitsP2) && hRecHitsP2.isValid()) {
       for (auto it = hRecHitsP2->begin(); it != hRecHitsP2->end(); ++it) {
-        const RPCRecHitPhase2& hit = *it;
+        const RPCRecHit& hit = *it;
         const RPCDetId detId = hit.rpcId();
         const RPCRoll* rollDet = rpcGeom.roll(detId);
         if (!rollDet) {
@@ -258,7 +256,7 @@ void RPCRecHitDumper::analyze(const edm::Event& iEvent, const edm::EventSetup& i
         fillPointInfo(lp, gp);
         fillHitCommon(hit);
 
-        rpcRecHitPhase2Tree_->Fill();
+        rpcRecHitsPhase2Tree_->Fill();
       }
     }
   }

@@ -48,33 +48,33 @@ def main() -> None:
 
     tree_specs: list[TreeSpec] = []
 
-    if (not args.no_rpc_digi) and ("rpcDigiTree" in available):
+    if (not args.no_rpc_digi) and ("simMuonRPCDigisTree" in available):
         tree_specs.append(
             TreeSpec(
-                tree_name="rpcDigiTree",
-                label="RPCDigi",
+                tree_name="simMuonRPCDigisTree",
+                label="simMuonRPCDigis",
                 marker="o",
                 size=18.0,
                 alpha=0.90,
             )
         )
 
-    if (not args.no_rpc_digi_phase2) and ("rpcDigiPhase2Tree" in available):
+    if (not args.no_rpc_digi_phase2) and ("simMuonRPCDigisPhase2Tree" in available):
         tree_specs.append(
             TreeSpec(
-                tree_name="rpcDigiPhase2Tree",
-                label="RPCDigiPhase2",
+                tree_name="simMuonRPCDigisPhase2Tree",
+                label="simMuonRPCDigisPhase2",
                 marker="x",
                 size=18.0,
                 alpha=0.90,
             )
         )
 
-    if (not args.no_irpc) and ("irpcDigiTree" in available):
+    if (not args.no_irpc) and ("simMuonIRPCDigisTree" in available):
         tree_specs.append(
             TreeSpec(
-                tree_name="irpcDigiTree",
-                label="IRPCDigi",
+                tree_name="simMuonIRPCDigisTree",
+                label="simMuonIRPCDigis",
                 marker="^",
                 size=18.0,
                 alpha=0.9,

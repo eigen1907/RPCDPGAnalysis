@@ -20,14 +20,14 @@ mh.style.use(mh.styles.CMS)
 
 
 RECHIT_TREES = [
-    "rpcRecHitTree",
-    "rpcRecHitPhase2Tree",
+    "rpcRecHitsTree",
+    "rpcRecHitsPhase2Tree",
 ]
 
 DIGI_TREES = [
-    "rpcDigiTree",
-    "rpcDigiPhase2Tree",
-    "irpcDigiTree",
+    "simMuonRPCDigisTree",
+    "simMuonRPCDigisPhase2Tree",
+    "simMuonIRPCDigisTree",
 ]
 
 SUPPORTED_TREES = RECHIT_TREES + DIGI_TREES
