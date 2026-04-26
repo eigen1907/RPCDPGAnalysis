@@ -13,6 +13,11 @@ from RPCDPGAnalysis.RPCDumper.PlotRPCObjectMap import (
     run_scatter_plotting,
 )
 
+from RPCDPGAnalysis.RPCDumper.plotRPCHist1D import (
+    digi_hist_list,
+    run_hist1d_plotting,
+)
+
 
 def get_pkg_dir() -> Path:
     return Path(os.environ["CMSSW_BASE"]) / "src" / "RPCDPGAnalysis" / "RPCDumper"
@@ -25,30 +30,28 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
+
     parser.add_argument("-i", "--input", type=Path, default=data / "digis.root")
     parser.add_argument("-g", "--geom", type=Path, default=data / "geometry.csv")
     parser.add_argument("-o", "--output", type=Path, default=pkg / "plots" / "digi")
-    parser.add_argument("--label", type=str, default="Phase2 Simulation Private Work")
-    parser.add_argument("--year", type=str, default="")
-    parser.add_argument("--com", type=float, default=14)
-    parser.add_argument("--lumi", type=float, default=None)
-
-    parser.add_argument("--no-rpc-digi", action="store_true")
-    parser.add_argument("--no-rpc-digi-phase2", action="store_true")
-    parser.add_argument("--no-irpc", action="store_true")
 
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    available = set(get_available_trees(args.input, allowed_trees=DIGI_TREES))
 
+    label = "Phase2 Simulation Private Work"
+    year = ""
+    com = 14
+    lumi = None
+
+    available = set(get_available_trees(args.input, allowed_trees=DIGI_TREES))
     print("[info] available trees:", ", ".join(sorted(available)) if available else "(none)")
 
     tree_specs: list[TreeSpec] = []
 
-    if (not args.no_rpc_digi) and ("simMuonRPCDigisTree" in available):
+    if "simMuonRPCDigisTree" in available:
         tree_specs.append(
             TreeSpec(
                 tree_name="simMuonRPCDigisTree",
@@ -59,7 +62,7 @@ def main() -> None:
             )
         )
 
-    if (not args.no_rpc_digi_phase2) and ("simMuonRPCDigisPhase2Tree" in available):
+    if "simMuonRPCDigisPhase2Tree" in available:
         tree_specs.append(
             TreeSpec(
                 tree_name="simMuonRPCDigisPhase2Tree",
@@ -70,19 +73,19 @@ def main() -> None:
             )
         )
 
-    if (not args.no_irpc) and ("simMuonIRPCDigisTree" in available):
+    if "simMuonIRPCDigisTree" in available:
         tree_specs.append(
             TreeSpec(
                 tree_name="simMuonIRPCDigisTree",
                 label="simMuonIRPCDigis",
                 marker="^",
                 size=18.0,
-                alpha=0.9,
+                alpha=0.90,
             )
         )
 
     if not tree_specs:
-        print("[warning] No requested digi trees were found.")
+        print("[warning] No digi trees were found.")
         return
 
     print("[info] trees to draw:", ", ".join(spec.tree_name for spec in tree_specs))
@@ -90,12 +93,23 @@ def main() -> None:
     run_scatter_plotting(
         input_path=args.input,
         geom_path=args.geom,
-        output_dir=args.output,
+        output_dir=args.output / "map2d",
         tree_specs=tree_specs,
-        label=args.label,
-        year=args.year,
-        com=args.com,
-        lumi=args.lumi,
+        label=label,
+        year=year,
+        com=com,
+        lumi=lumi,
+    )
+
+    run_hist1d_plotting(
+        input_path=args.input,
+        output_dir=args.output / "hist1d",
+        tree_specs=tree_specs,
+        hist_list=digi_hist_list(),
+        label=label,
+        year=year,
+        com=com,
+        lumi=lumi,
     )
 
 
