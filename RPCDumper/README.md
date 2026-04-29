@@ -29,11 +29,11 @@ runTheMatrix.py --what upgrade -l 36034.62
 ## Simple Muon Gun Test
 
 ```bash
-cmsDriver.py SingleMuFlatPt2To100_cfi -s GEN,SIM -n 100 --conditions auto:phase2_realistic_T35 --beamspot DBrealisticHLLHC --datatier GEN-SIM --eventcontent FEVTDEBUG --geometry ExtendedRun4D125 --era Phase2C22I13M9 --fileout file:step1.root --nThreads 4 > step1.log 2>&1
+cmsDriver.py SingleMuFlatPt2To100_cfi -s GEN,SIM -n 10000 --conditions auto:phase2_realistic_T35 --beamspot DBrealisticHLLHC --datatier GEN-SIM --eventcontent FEVTDEBUG --geometry ExtendedRun4D125 --era Phase2C22I13M9 --fileout file:step1.root --nThreads 16 > step1.log 2>&1
 
-cmsDriver.py step2 -s DIGI:pdigi_valid,L1TrackTrigger,L1,L1P2GT,DIGI2RAW,HLT:@relvalRun4 --conditions auto:phase2_realistic_T35 --datatier GEN-SIM-DIGI-RAW -n -1 --eventcontent FEVTDEBUGHLT --geometry ExtendedRun4D125 --era Phase2C22I13M9,phase2_rpc_devel --filein file:step1.root --fileout file:step2.root --nThreads 4 > step2.log 2>&1
+cmsDriver.py step2 -s DIGI:pdigi_valid,L1TrackTrigger,L1,L1P2GT,DIGI2RAW,HLT:@relvalRun4 --conditions auto:phase2_realistic_T35 --datatier GEN-SIM-DIGI-RAW -n -1 --eventcontent FEVTDEBUGHLT --geometry ExtendedRun4D125 --era Phase2C22I13M9,phase2_rpc_devel --filein file:step1.root --fileout file:step2.root --nThreads 16 > step2.log 2>&1
 
-cmsDriver.py step3 -s RAW2DIGI,RECO,RECOSIM,PAT --conditions auto:phase2_realistic_T35 --datatier GEN-SIM-RECO -n -1 --eventcontent FEVTDEBUGHLT --geometry ExtendedRun4D125 --era Phase2C22I13M9,phase2_rpc_devel --filein file:step2.root --fileout file:step3.root --nThreads 4 > step3.log 2>&1
+cmsDriver.py step3 -s RAW2DIGI,RECO,RECOSIM,PAT --conditions auto:phase2_realistic_T35 --datatier GEN-SIM-RECO -n -1 --eventcontent FEVTDEBUGHLT --geometry ExtendedRun4D125 --era Phase2C22I13M9,phase2_rpc_devel --filein file:step2.root --fileout file:step3.root --nThreads 16 > step3.log 2>&1
 ```
 
 ## Dumpers

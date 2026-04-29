@@ -8,13 +8,13 @@ import pandas as pd
 import uproot
 
 import matplotlib as mpl
+
 mpl.use("agg")
 import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
 import mplhep as mh
 
 from RPCDPGAnalysis.NanoAODTnP.RPCGeomServ import RPCRoll  # type: ignore
-
 
 mh.style.use(mh.styles.CMS)
 
@@ -47,6 +47,7 @@ def detector_unit(region: int, station: int, layer: int) -> str:
         if station <= 2:
             return f"RB{station}{'in' if layer == 1 else 'out'}"
         return f"RB{station}"
+
     return f"RE{region * station:+d}"
 
 
@@ -55,8 +56,10 @@ def resolve_input_files(path: Path) -> list[Path]:
         return [path]
 
     files = sorted(each for each in path.rglob("*.root") if each.is_file())
+
     if not files:
         raise FileNotFoundError(f"No ROOT files found under: {path}")
+
     return files
 
 
@@ -69,6 +72,7 @@ def find_tree_path(file: Path, tree_name: str) -> str | None:
         for key in f.keys(recursive=True):
             if basename(key) == tree_name:
                 return key.split(";")[0]
+
     return None
 
 
@@ -96,8 +100,10 @@ def load_geometry(geom_path: Path) -> list[RPCRoll]:
 
 def group_rolls_by_unit(rolls: list[RPCRoll]) -> dict[str, list[RPCRoll]]:
     out: dict[str, list[RPCRoll]] = {}
+
     for roll in rolls:
         out.setdefault(roll.id.detector_unit, []).append(roll)
+
     return out
 
 
@@ -167,8 +173,42 @@ def build_roll_phi_center_map(
     return out
 
 
+def pick_branch(available: set[str], candidates: list[str]) -> str | None:
+    for name in candidates:
+        if name in available:
+            return name
+
+    return None
+
+
+def empty_points() -> dict[str, np.ndarray]:
+    empty_f = np.asarray([], dtype=np.float64)
+    empty_i = np.asarray([], dtype=np.int32)
+    empty_o = np.asarray([], dtype=object)
+
+    empty_key = np.rec.fromarrays(
+        [empty_i, empty_i, empty_i, empty_i, empty_i, empty_i, empty_i],
+        names=["region", "ring", "station", "sector", "layer", "subsector", "roll"],
+    )
+
+    return {
+        "unit": empty_o,
+        "global_x": empty_f,
+        "global_y": empty_f,
+        "global_z": empty_f,
+        "region": empty_i,
+        "ring": empty_i,
+        "station": empty_i,
+        "sector": empty_i,
+        "layer": empty_i,
+        "subsector": empty_i,
+        "roll": empty_i,
+        "roll_key": empty_key,
+    }
+
+
 def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
-    branches = [
+    output_names = [
         "region",
         "ring",
         "station",
@@ -181,7 +221,7 @@ def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
         "global_z",
     ]
 
-    parts: dict[str, list[np.ndarray]] = {name: [] for name in branches}
+    parts: dict[str, list[np.ndarray]] = {name: [] for name in output_names}
 
     for file in resolve_input_files(input_path):
         tree_path = find_tree_path(file, tree_name)
@@ -189,35 +229,40 @@ def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
             continue
 
         with uproot.open(file) as f:
-            arr = f[tree_path].arrays(branches, library="np")
+            tree = f[tree_path]
+            available = set(tree.keys())
 
-        for name in branches:
-            parts[name].append(arr[name])
+            branch_map = {
+                "region": pick_branch(available, ["region"]),
+                "ring": pick_branch(available, ["ring"]),
+                "station": pick_branch(available, ["station"]),
+                "sector": pick_branch(available, ["sector"]),
+                "layer": pick_branch(available, ["layer"]),
+                "subsector": pick_branch(available, ["subsector"]),
+                "roll": pick_branch(available, ["roll"]),
+                "global_x": pick_branch(available, ["global_x", "rechit_global_x"]),
+                "global_y": pick_branch(available, ["global_y", "rechit_global_y"]),
+                "global_z": pick_branch(available, ["global_z", "rechit_global_z"]),
+            }
 
-    if not parts["region"]:
-        empty_f = np.asarray([], dtype=np.float64)
-        empty_i = np.asarray([], dtype=np.int32)
-        empty_o = np.asarray([], dtype=object)
-        empty_key = np.rec.fromarrays(
-            [empty_i, empty_i, empty_i, empty_i, empty_i, empty_i, empty_i],
-            names=["region", "ring", "station", "sector", "layer", "subsector", "roll"],
-        )
-        return {
-            "unit": empty_o,
-            "global_x": empty_f,
-            "global_y": empty_f,
-            "global_z": empty_f,
-            "region": empty_i,
-            "ring": empty_i,
-            "station": empty_i,
-            "sector": empty_i,
-            "layer": empty_i,
-            "subsector": empty_i,
-            "roll": empty_i,
-            "roll_key": empty_key,
-        }
+            missing = [name for name, branch in branch_map.items() if branch is None]
+            if missing:
+                print(
+                    f"[warning] skip map points for {tree_name} in {file}: "
+                    f"missing branches = {', '.join(missing)}"
+                )
+                continue
 
-    out = {name: np.concatenate(parts[name]) for name in branches}
+            read_branches = list(branch_map.values())
+            arr = tree.arrays(read_branches, library="np")
+
+            for name in output_names:
+                parts[name].append(arr[branch_map[name]])
+
+    if len(parts["region"]) == 0:
+        return empty_points()
+
+    out = {name: np.concatenate(parts[name]) for name in output_names}
 
     region = out["region"].astype(np.int32)
     ring = out["ring"].astype(np.int32)
@@ -228,7 +273,10 @@ def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
     roll = out["roll"].astype(np.int32)
 
     unit = np.asarray(
-        [detector_unit(int(r), int(s), int(l)) for r, s, l in zip(region, station, layer)],
+        [
+            detector_unit(int(r), int(s), int(l))
+            for r, s, l in zip(region, station, layer)
+        ],
         dtype=object,
     )
 
@@ -260,9 +308,11 @@ def load_points(input_path: Path, tree_name: str) -> dict[str, np.ndarray]:
 
 def wrap_phi_to_reference(phi: np.ndarray, phi_ref: float) -> np.ndarray:
     wrapped = phi.copy()
+
     delta = wrapped - phi_ref
     wrapped[delta > np.pi] -= 2.0 * np.pi
     wrapped[delta < -np.pi] += 2.0 * np.pi
+
     return wrapped
 
 
@@ -279,6 +329,7 @@ def compute_barrel_phi_from_rolls(
         return phi
 
     out = phi.copy()
+
     unique_keys, inverse = np.unique(roll_keys, return_inverse=True)
 
     for idx, key in enumerate(unique_keys):
@@ -312,6 +363,7 @@ def project_points(
             roll_keys=roll_keys,
             phi_center_map=phi_center_map,
         )
+
         return z, phi
 
     return x, y
@@ -319,6 +371,7 @@ def project_points(
 
 def draw_geometry(ax: plt.Axes, rolls: list[RPCRoll]) -> None:
     patches = [roll.polygon for roll in rolls]
+
     ax.add_collection(
         PatchCollection(
             patches,
@@ -327,9 +380,12 @@ def draw_geometry(ax: plt.Axes, rolls: list[RPCRoll]) -> None:
             linewidth=1.0,
         )
     )
+
     ax.autoscale_view()
+
     ax.set_xlabel(rolls[0].polygon_xlabel)
     ax.set_ylabel(rolls[0].polygon_ylabel)
+
     if rolls[0].polygon_ymax is not None:
         ax.set_ylim(None, rolls[0].polygon_ymax)
 
@@ -349,6 +405,7 @@ def run_geometry_plotting(
 
     for unit, each_rolls in rolls_by_unit.items():
         fig, ax = plt.subplots(figsize=(12, 9))
+
         draw_geometry(ax, each_rolls)
 
         ax.annotate(
@@ -361,8 +418,15 @@ def run_geometry_plotting(
             weight="bold",
         )
 
-        mh.cms.label(ax=ax, llabel=label, lumi=lumi, year=year, com=com)
-        fig.savefig(output_dir / f"{unit}.png")
+        mh.cms.label(
+            ax=ax,
+            llabel=label,
+            lumi=lumi,
+            year=year,
+            com=com,
+        )
+
+        fig.savefig(output_dir / f"{unit}.png", dpi=150)
         plt.close(fig)
 
 
@@ -389,6 +453,7 @@ def run_scatter_plotting(
 
     for unit, rolls in rolls_by_unit.items():
         fig, ax = plt.subplots(figsize=(12, 9))
+
         draw_geometry(ax, rolls)
 
         drawn = 0
@@ -424,6 +489,7 @@ def run_scatter_plotting(
                 marker=spec.marker,
                 label=f"{spec.label} ({len(xp)})",
             )
+
             drawn += 1
 
         ax.annotate(
@@ -439,6 +505,13 @@ def run_scatter_plotting(
         if drawn > 0:
             ax.legend(loc="upper right", fontsize=18, frameon=True)
 
-        mh.cms.label(ax=ax, llabel=label, lumi=lumi, year=year, com=com)
+        mh.cms.label(
+            ax=ax,
+            llabel=label,
+            lumi=lumi,
+            year=year,
+            com=com,
+        )
+
         fig.savefig(output_dir / f"{unit}.png", dpi=150)
         plt.close(fig)
