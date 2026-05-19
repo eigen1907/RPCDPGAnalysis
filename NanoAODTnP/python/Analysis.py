@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 from pathlib import Path
 from functools import singledispatchmethod
 import numpy as np
@@ -87,27 +86,31 @@ class LumiBlockChecker:
 
 ALL_OPTIONAL_EVENT_KEYS = ('bunchCrossing', 'orbitNumber')
 
-TRIAL_FLOAT_KEYS = {
-    'tag_pt', 'tag_eta', 'tag_phi',
-    'probe_pt', 'probe_eta', 'probe_phi',
-    'probe_time', 'probe_dxdz', 'probe_dydz',
-    'dimuon_pt', 'dimuon_mass',
+RPC_FLOAT_KEYS = [
+    'probe_at_rpc_pt',
+    'probe_at_rpc_eta',
+    'probe_at_rpc_phi',
+    'probe_at_rpc_dxdz',
+    'probe_at_rpc_dydz',
+    'probe_at_rpc_local_x',
+    'probe_at_rpc_local_y',
     'residual_x', 'residual_y',
     'pull_x', 'pull_y', 'pull_x_v2', 'pull_y_v2',
-}
-TRIAL_INT_KEYS = {
+]
+RPC_INT_KEYS = [
     'region', 'ring', 'station', 'sector', 'layer', 'subsector', 'roll',
     'cls', 'bx',
-}
-TRIAL_BOOL_KEYS = {
+]
+RPC_BOOL_KEYS = [
     'is_fiducial', 'is_matched',
-}
+]
 PAIR_KEYS = [
     'tag_pt', 'tag_eta', 'tag_phi',
     'probe_pt', 'probe_eta', 'probe_phi',
     'probe_time',
-    'dimuon_pt', 'dimuon_mass',
+    'pair_pt', 'pair_mass',
 ]
+RPC_KEYS = RPC_FLOAT_KEYS + RPC_INT_KEYS + RPC_BOOL_KEYS
 
 
 def _get_tree_entry_count(tree_dict: dict[str, np.ndarray]) -> int:
@@ -192,86 +195,94 @@ def read_nanoaod_base(
     return base_tree, list(ALL_OPTIONAL_EVENT_KEYS)
 
 
-def build_trial_tree(
+def build_rpc_tree(
     base_tree,
     optional_event_keys,
 ):
+    _ensure_required_fields(base_tree.fields, RPC_KEYS, "base_tree for rpc_tree")
+
     size = np.asarray(ak.to_numpy(base_tree['size']), dtype=np.int32)
     total_size = int(np.sum(size, dtype=np.int64))
 
-    event_keys = {'run', 'luminosityBlock', 'event', 'size', *optional_event_keys}
-    jagged_keys = [key for key in base_tree.fields if key not in event_keys]
-    if len(jagged_keys) == 0:
-        raise RuntimeError("No jagged rpcTnP branches found for trial_tree")
-
-    counts_ref = np.asarray(ak.to_numpy(ak.num(base_tree[jagged_keys[0]], axis=1)), dtype=np.int32)
-    if not np.array_equal(counts_ref, size):
-        raise RuntimeError(
-            f"Jagged count mismatch between '{jagged_keys[0]}' and 'size'"
-        )
-
-    for key in jagged_keys[1:]:
+    for key in RPC_KEYS:
         counts = np.asarray(ak.to_numpy(ak.num(base_tree[key], axis=1)), dtype=np.int32)
         if not np.array_equal(counts, size):
             raise RuntimeError(
-                f"Jagged count mismatch between '{key}' and 'size'"
+                f"RPC jagged count mismatch between '{key}' and 'size'"
             )
 
-    trial_tree = {}
+    rpc_tree = {}
 
-    for key in jagged_keys:
+    for key in RPC_FLOAT_KEYS:
         flat_value = ak.flatten(base_tree[key], axis=1)
         flat_value = ak.to_numpy(flat_value)
 
         if len(flat_value) != total_size:
             raise RuntimeError(
-                f"trial flatten size mismatch for '{key}': "
+                f"rpc flatten size mismatch for '{key}': "
                 f"{len(flat_value)} != {total_size}"
             )
 
-        if key in TRIAL_FLOAT_KEYS:
-            trial_tree[key] = np.asarray(flat_value, dtype=np.float64)
-        elif key in TRIAL_INT_KEYS:
-            trial_tree[key] = np.asarray(flat_value, dtype=np.int32)
-        elif key in TRIAL_BOOL_KEYS:
-            trial_tree[key] = np.asarray(flat_value, dtype=np.bool_)
-        else:
-            trial_tree[key] = np.asarray(flat_value)
+        rpc_tree[key] = np.asarray(flat_value, dtype=np.float64)
+
+    for key in RPC_INT_KEYS:
+        flat_value = ak.flatten(base_tree[key], axis=1)
+        flat_value = ak.to_numpy(flat_value)
+
+        if len(flat_value) != total_size:
+            raise RuntimeError(
+                f"rpc flatten size mismatch for '{key}': "
+                f"{len(flat_value)} != {total_size}"
+            )
+
+        rpc_tree[key] = np.asarray(flat_value, dtype=np.int32)
+
+    for key in RPC_BOOL_KEYS:
+        flat_value = ak.flatten(base_tree[key], axis=1)
+        flat_value = ak.to_numpy(flat_value)
+
+        if len(flat_value) != total_size:
+            raise RuntimeError(
+                f"rpc flatten size mismatch for '{key}': "
+                f"{len(flat_value)} != {total_size}"
+            )
+
+        rpc_tree[key] = np.asarray(flat_value, dtype=np.bool_)
 
     run = np.asarray(ak.to_numpy(base_tree['run']), dtype=np.uint32)
     lumi_block = np.asarray(ak.to_numpy(base_tree['luminosityBlock']), dtype=np.uint32)
     event = np.asarray(ak.to_numpy(base_tree['event']), dtype=np.uint64)
 
     if total_size > 0:
-        trial_tree['run'] = np.asarray(np.repeat(run, size), dtype=np.uint32)
-        trial_tree['luminosityBlock'] = np.asarray(np.repeat(lumi_block, size), dtype=np.uint32)
-        trial_tree['event'] = np.asarray(np.repeat(event, size), dtype=np.uint64)
+        rpc_tree['run'] = np.asarray(np.repeat(run, size), dtype=np.uint32)
+        rpc_tree['luminosityBlock'] = np.asarray(np.repeat(lumi_block, size), dtype=np.uint32)
+        rpc_tree['event'] = np.asarray(np.repeat(event, size), dtype=np.uint64)
 
         for key in optional_event_keys:
             value = np.asarray(ak.to_numpy(base_tree[key]), dtype=np.int32)
-            trial_tree[key] = np.asarray(np.repeat(value, size), dtype=np.int32)
+            rpc_tree[key] = np.asarray(np.repeat(value, size), dtype=np.int32)
 
-        trial_tree['pair_index'] = np.zeros(total_size, dtype=np.int32)
-        trial_tree['nrpcTnP'] = np.asarray(np.repeat(size, size), dtype=np.int32)
+        rpc_tree['pair_index'] = np.zeros(total_size, dtype=np.int32)
+        rpc_tree['nrpcTnP'] = np.asarray(np.repeat(size, size), dtype=np.int32)
 
-        trial_index = ak.local_index(base_tree[jagged_keys[0]], axis=1)
-        trial_tree['trial_index'] = np.asarray(
-            ak.to_numpy(ak.flatten(trial_index, axis=1)),
+        rpc_index = ak.local_index(base_tree[RPC_KEYS[0]], axis=1)
+        rpc_tree['rpc_index'] = np.asarray(
+            ak.to_numpy(ak.flatten(rpc_index, axis=1)),
             dtype=np.int32
         )
     else:
-        trial_tree['run'] = np.array([], dtype=np.uint32)
-        trial_tree['luminosityBlock'] = np.array([], dtype=np.uint32)
-        trial_tree['event'] = np.array([], dtype=np.uint64)
+        rpc_tree['run'] = np.array([], dtype=np.uint32)
+        rpc_tree['luminosityBlock'] = np.array([], dtype=np.uint32)
+        rpc_tree['event'] = np.array([], dtype=np.uint64)
 
         for key in optional_event_keys:
-            trial_tree[key] = np.array([], dtype=np.int32)
+            rpc_tree[key] = np.array([], dtype=np.int32)
 
-        trial_tree['pair_index'] = np.array([], dtype=np.int32)
-        trial_tree['nrpcTnP'] = np.array([], dtype=np.int32)
-        trial_tree['trial_index'] = np.array([], dtype=np.int32)
+        rpc_tree['pair_index'] = np.array([], dtype=np.int32)
+        rpc_tree['nrpcTnP'] = np.array([], dtype=np.int32)
+        rpc_tree['rpc_index'] = np.array([], dtype=np.int32)
 
-    return trial_tree
+    return rpc_tree
 
 
 def build_pair_tree(
@@ -337,7 +348,7 @@ def validate_flat_tree(tree_dict: dict[str, np.ndarray], tree_name: str):
 
 def validate_output_root(path: Path):
     with uproot.open(path) as root_file:
-        for tree_name in ('trial_tree', 'pair_tree'):
+        for tree_name in ('pair_tree', 'rpc_tree'):
             if tree_name not in root_file:
                 raise RuntimeError(f"missing tree '{tree_name}' in output")
 
@@ -376,7 +387,7 @@ def flatten_nanoaod(
         name=name,
     )
 
-    trial_tree = build_trial_tree(
+    rpc_tree = build_rpc_tree(
         base_tree=base_tree,
         optional_event_keys=optional_event_keys,
     )
@@ -385,7 +396,7 @@ def flatten_nanoaod(
         optional_event_keys=optional_event_keys,
     )
 
-    validate_flat_tree(trial_tree, 'trial_tree')
+    validate_flat_tree(rpc_tree, 'rpc_tree')
     validate_flat_tree(pair_tree, 'pair_tree')
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -393,7 +404,7 @@ def flatten_nanoaod(
     empty_marker = output_path.parent / f"{output_path.name}.empty"
     tmp_output_path = output_path.parent / f"{output_path.stem}.tmp{output_path.suffix}"
 
-    trial_entries = _get_tree_entry_count(trial_tree)
+    rpc_entries = _get_tree_entry_count(rpc_tree)
     pair_entries = _get_tree_entry_count(pair_tree)
 
     if empty_marker.exists():
@@ -401,15 +412,15 @@ def flatten_nanoaod(
     if tmp_output_path.exists():
         tmp_output_path.unlink()
 
-    if trial_entries == 0 and pair_entries == 0:
+    if rpc_entries == 0 and pair_entries == 0:
         if output_path.exists():
             output_path.unlink()
         empty_marker.write_text("empty\n")
         return
 
-    trial_branches = {
+    rpc_branches = {
         key: np.asarray(value).dtype
-        for key, value in trial_tree.items()
+        for key, value in rpc_tree.items()
     }
     pair_branches = {
         key: np.asarray(value).dtype
@@ -418,16 +429,16 @@ def flatten_nanoaod(
 
     try:
         with uproot.recreate(tmp_output_path) as output_file:
-            output_file.mktree('trial_tree', trial_branches)
-            output_file['trial_tree'].extend({
-                key: np.asarray(value)
-                for key, value in trial_tree.items()
-            })
-
             output_file.mktree('pair_tree', pair_branches)
             output_file['pair_tree'].extend({
                 key: np.asarray(value)
                 for key, value in pair_tree.items()
+            })
+
+            output_file.mktree('rpc_tree', rpc_branches)
+            output_file['rpc_tree'].extend({
+                key: np.asarray(value)
+                for key, value in rpc_tree.items()
             })
 
         validate_output_root(tmp_output_path)
