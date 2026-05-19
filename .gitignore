@@ -3,3 +3,4 @@ __init__.py
 core.*
 *.swp
 *.png
+logs/

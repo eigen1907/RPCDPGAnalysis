@@ -27,11 +27,11 @@ python3 ${WORK_DIR}/scripts/rpc-tnp-plot-pair-kinematics.py \
   -o ${WORK_DIR}/plots/Run3/pair \
   -l "Private Work" \
   --tree-name pair_tree \
-  --branch dimuon_mass \
+  --branch pair_mass \
   --xmin 70 \
   --xmax 110 \
   --nbins 80 \
-  --name rpc-tnp-pair-dimuon-mass \
+  --name rpc-tnp-pair-mass \
   --ext png \
   --plot-probe-pt \
   --plot-probe-eta \

@@ -93,7 +93,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--branch",
-        default="dimuon_mass",
+        default="pair_mass",
         help="Default branch to plot."
     )
     parser.add_argument(
@@ -281,7 +281,7 @@ def preload_branch_cache(
 
 
 def make_xlabel(branch_name: str) -> str:
-    if branch_name == "dimuon_mass":
+    if branch_name == "pair_mass":
         return r"$\mu^{+}\mu^{-}$ (Tag-Probe) invariant mass [$\mathrm{GeV}$]"
     if branch_name == "probe_pt":
         return r"Probe Muon $p_{T}$ [$\mathrm{GeV}$]"

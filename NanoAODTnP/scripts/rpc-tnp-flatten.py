@@ -7,10 +7,10 @@ from RPCDPGAnalysis.NanoAODTnP.Analysis import flatten_nanoaod
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("input_path")
-    parser.add_argument("cert_path", type=Path)
-    parser.add_argument("output_path", type=Path)
-    parser.add_argument("name", nargs="?", default="rpcTnP")
+    parser.add_argument("-i", "--input_path")
+    parser.add_argument("-c", "--cert_path", type=Path)
+    parser.add_argument("-o", "--output_path", type=Path)
+    parser.add_argument("-n", "--name", nargs="?", default="rpcTnP")
     args = parser.parse_args()
 
     flatten_nanoaod(
