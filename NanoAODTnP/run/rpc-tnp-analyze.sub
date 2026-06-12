@@ -1,0 +1,22 @@
+# CMSSW_BASE, ITEMS_FILE, and SUBMIT_TAG are supplied by rpc-tnp-analyze-submit.sh.
+PKG_BASE = $(CMSSW_BASE)/src/RPCDPGAnalysis/NanoAODTnP
+LOG_BASE = $(PKG_BASE)/logs/condor/$(SUBMIT_TAG)
+
+universe = vanilla
+initialdir = $(PKG_BASE)
+
+executable = $(PKG_BASE)/run/rpc-tnp-analyze-run.sh
+arguments = $(CMSSW_BASE) $(input_eos) $(cert_path) $(ROLL_BLACKLIST_PATH) $(output_eos) rpcTnP
+
+should_transfer_files = IF_NEEDED
+when_to_transfer_output = ON_EXIT
+transfer_output_files = ""
+
+input = $(PKG_BASE)/run/rpc-tnp-analyze.empty.stdin
+output = $(LOG_BASE)/$(pd)/$(dataset_name)/log/$(ClusterId).out
+error = $(LOG_BASE)/$(pd)/$(dataset_name)/log/$(ClusterId).err
+log = $(LOG_BASE)/$(pd)/$(dataset_name)/log/$(ClusterId).log
+
+JobBatchName = rpc-tnp-analyze-$(pd)-$(dataset_name)-$(SUBMIT_TAG)
+
+queue input_eos, cert_path, output_eos, pd, dataset_name from $(ITEMS_FILE)

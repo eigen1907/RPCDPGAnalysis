@@ -1,459 +1,176 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import csv
+from collections import defaultdict
+from datetime import datetime, timezone
+import glob
 import json
-import re
+from pathlib import Path
 import subprocess
 import tempfile
-from collections import defaultdict
-from pathlib import Path
+from typing import Iterable, Sequence
 
 
-DATASET_RE = re.compile(
-    r"^(?P<pd>[A-Za-z0-9]+)_(?P<era>Run(?P<year>\d{4})(?P<subera>[A-Z]))-(?P<reco>.+)-v(?P<version>\d+)$"
-)
+PACKAGE_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_INPUT = PACKAGE_DIR / "logs/lumi"
+DEFAULT_OUTPUT = PACKAGE_DIR / "data/lumi/run3.csv"
+GOLDEN_JSON_FILENAME = "processedLumisGolden.json"
+BRILCALC_TIME_FORMAT = "%m/%d/%y %H:%M:%S"
+DEFAULT_NORMTAG = Path("/cvmfs/cms-bril.cern.ch/cms-lumi-pog/Normtags/normtag_BRIL.json")
 
 
-def run_cmd(cmd):
-    proc = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"Command failed: {' '.join(cmd)}\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
-    return proc.stdout
+def _flatten_paths(paths: Sequence[Path | str | Sequence[Path | str]]) -> Iterable[Path]:
+    for path in paths:
+        if isinstance(path, (str, Path)):
+            yield Path(path)
+        else:
+            yield from _flatten_paths(path)
 
 
-def split_csv_line(line: str):
-    return [x.strip() for x in next(csv.reader([line]))]
+def resolve_golden_json_files(paths: Sequence[Path | str | Sequence[Path | str]]) -> list[Path]:
+    files: list[Path] = []
+    for path in _flatten_paths(paths):
+        text = str(path)
+        if any(token in text for token in "*?[]"):
+            files.extend(Path(match) for match in sorted(glob.glob(text, recursive=True)))
+        elif path.is_file():
+            files.append(path)
+        elif path.is_dir():
+            files.extend(sorted(path.rglob(GOLDEN_JSON_FILENAME)))
+        else:
+            raise FileNotFoundError(f"Golden lumi JSON path does not exist: {path}")
+    files = list(dict.fromkeys(path.resolve() for path in files if path.is_file()))
+    if not files:
+        raise FileNotFoundError(f"No {GOLDEN_JSON_FILENAME} files found in: {paths}")
+    return files
 
 
-def normalize_csvish_line(line: str) -> str:
-    text = line.strip()
-    if not text:
-        return ""
-    if text.startswith("#"):
-        text = text[1:].strip()
-    return text
-
-
-def has_any_lumi(data: dict[str, list[list[int]]]) -> bool:
-    for ranges in data.values():
-        if ranges:
-            return True
-    return False
-
-
-def parse_brilcalc_text(text: str) -> tuple[float, float]:
-    lines = text.splitlines()
-
-    # Pass 1:
-    # Parse summary block:
-    # nfill,nrun,nls,ncms,totdelivered(/fb),totrecorded(/fb)
-    for i, raw in enumerate(lines):
-        body = normalize_csvish_line(raw)
-        if not body or "," not in body:
-            continue
-
-        fields = [x.lower() for x in split_csv_line(body)]
-
-        delivered_idx = None
-        recorded_idx = None
-        for j, field in enumerate(fields):
-            if "totdelivered" in field:
-                delivered_idx = j
-            if "totrecorded" in field:
-                recorded_idx = j
-
-        if delivered_idx is None or recorded_idx is None:
-            continue
-
-        for raw2 in lines[i + 1:]:
-            body2 = normalize_csvish_line(raw2)
-            if not body2 or "," not in body2:
-                continue
-
-            values = split_csv_line(body2)
-            if len(values) <= max(delivered_idx, recorded_idx):
-                continue
-
-            try:
-                delivered = float(values[delivered_idx])
-                recorded = float(values[recorded_idx])
-                return delivered, recorded
-            except ValueError:
-                continue
-
-    # Pass 2:
-    # Parse per-LS block and sum delivered/recorded columns:
-    # run:fill,ls,time,beamstatus,energy,delivered(/fb),recorded(/fb),avgpu,source
-    for i, raw in enumerate(lines):
-        body = normalize_csvish_line(raw)
-        if not body or "," not in body:
-            continue
-
-        fields = [x.lower() for x in split_csv_line(body)]
-
-        delivered_idx = None
-        recorded_idx = None
-        for j, field in enumerate(fields):
-            if "totdelivered" in field or "totrecorded" in field:
-                continue
-            if field.startswith("delivered(") or field == "delivered":
-                delivered_idx = j
-            if field.startswith("recorded(") or field == "recorded":
-                recorded_idx = j
-
-        if delivered_idx is None or recorded_idx is None:
-            continue
-
-        delivered_sum = 0.0
-        recorded_sum = 0.0
-        found_numeric_row = False
-
-        for raw2 in lines[i + 1:]:
-            body2 = normalize_csvish_line(raw2)
-            if not body2:
-                continue
-
-            if "," not in body2:
-                if found_numeric_row:
-                    break
-                continue
-
-            values = split_csv_line(body2)
-            if len(values) <= max(delivered_idx, recorded_idx):
-                if found_numeric_row:
-                    break
-                continue
-
-            try:
-                delivered_sum += float(values[delivered_idx])
-                recorded_sum += float(values[recorded_idx])
-                found_numeric_row = True
-            except ValueError:
-                if found_numeric_row:
-                    break
-                continue
-
-        if found_numeric_row:
-            return delivered_sum, recorded_sum
-
-    raise RuntimeError("Could not parse delivered/recorded lumi from brilcalc text")
-
-
-def parse_brilcalc_csv(csv_path: Path) -> tuple[float, float]:
-    text = csv_path.read_text() if csv_path.exists() else ""
-    return parse_brilcalc_text(text)
-
-
-def brilcalc_from_json(json_path: Path) -> tuple[float, float]:
-    data = load_lumi_json(json_path)
-    if not has_any_lumi(data):
-        return 0.0, 0.0
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        out_csv = Path(tmpdir) / "brilcalc.csv"
-
-        proc = subprocess.run(
-            ["brilcalc", "lumi", "-u", "/fb", "-i", str(json_path), "-o", str(out_csv)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"brilcalc failed for {json_path}\n"
-                f"stdout:\n{proc.stdout}\n"
-                f"stderr:\n{proc.stderr}"
-            )
-
-        file_text = out_csv.read_text() if out_csv.exists() else ""
-        parse_text = file_text.strip()
-
-        if not parse_text:
-            parse_text = (proc.stdout or "") + "\n" + (proc.stderr or "")
-
-        try:
-            return parse_brilcalc_text(parse_text)
-        except RuntimeError as e:
-            preview = "\n".join(parse_text.splitlines()[:40])
-            raise RuntimeError(
-                f"{e}\n"
-                f"[json] {json_path}\n"
-                f"[brilcalc preview]\n{preview}\n"
-            ) from None
-
-
-def load_lumi_json(json_path: Path) -> dict[str, list[list[int]]]:
-    with json_path.open() as f:
-        data = json.load(f)
-
-    out = {}
-    for run, ranges in data.items():
-        out[str(run)] = [[int(a), int(b)] for a, b in ranges]
-    return out
-
-
-def merge_ranges(ranges: list[list[int]]) -> list[list[int]]:
-    if not ranges:
-        return []
-
-    ranges = sorted(ranges, key=lambda x: (x[0], x[1]))
-    merged = [ranges[0][:]]
-
-    for start, end in ranges[1:]:
-        last = merged[-1]
-        if start <= last[1] + 1:
-            last[1] = max(last[1], end)
+def _merge_ranges(ranges: list[list[int]]) -> list[list[int]]:
+    merged: list[list[int]] = []
+    for start, end in sorted(ranges):
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1][1] = max(merged[-1][1], end)
         else:
             merged.append([start, end])
-
     return merged
 
 
-def union_lumi_json(json_list: list[dict[str, list[list[int]]]]) -> dict[str, list[list[int]]]:
-    by_run = defaultdict(list)
-
-    for data in json_list:
-        for run, ranges in data.items():
-            by_run[str(run)].extend(ranges)
-
-    out = {}
-    for run, ranges in sorted(by_run.items(), key=lambda x: int(x[0])):
-        out[run] = merge_ranges(ranges)
-
-    return out
-
-
-def count_lumisections(data: dict[str, list[list[int]]]) -> int:
-    total = 0
-    for ranges in data.values():
-        for start, end in ranges:
-            total += end - start + 1
-    return total
-
-
-def write_json(path: Path, data: dict[str, list[list[int]]]):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        json.dump(data, f, sort_keys=True, indent=2)
-
-
-def write_csv(path: Path, rows: list[dict], fieldnames: list[str]):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def parse_dataset_name(name: str) -> tuple[str, str]:
-    m = DATASET_RE.match(name)
-    if m is None:
-        raise ValueError(f"Unrecognized dataset directory name: {name}")
-
-    d = m.groupdict()
-    era = d["era"]
-    year = f"Run{d['year']}"
-    return era, year
-
-
-def dataset_row(dataset_dir: Path):
-    dataset = dataset_dir.name
-
-    try:
-        parse_dataset_name(dataset)
-    except ValueError:
-        return None
-
-    json_path = dataset_dir / "processedLumis.json"
-    json_golden_path = dataset_dir / "processedLumis_Golden.json"
-
-    if not json_path.exists() or not json_golden_path.exists():
-        return None
-
-    lumi_json = load_lumi_json(json_path)
-    lumi_json_golden = load_lumi_json(json_golden_path)
-
-    delivered_fb, recorded_fb = brilcalc_from_json(json_path)
-    delivered_golden_fb, recorded_golden_fb = brilcalc_from_json(json_golden_path)
-
+def union_golden_lumis(paths: Sequence[Path | str | Sequence[Path | str]]) -> dict[str, list[list[int]]]:
+    by_run: defaultdict[str, list[list[int]]] = defaultdict(list)
+    for path in resolve_golden_json_files(paths):
+        with path.open() as stream:
+            payload = json.load(stream)
+        for run, ranges in payload.items():
+            by_run[str(run)].extend([[int(start), int(end)] for start, end in ranges])
     return {
-        "dataset": dataset,
-        "delivered_fb": delivered_fb,
-        "delivered_golden_fb": delivered_golden_fb,
-        "recorded_fb": recorded_fb,
-        "recorded_golden_fb": recorded_golden_fb,
-        "run": len(lumi_json),
-        "run_golden": len(lumi_json_golden),
-        "ls": count_lumisections(lumi_json),
-        "ls_golden": count_lumisections(lumi_json_golden),
+        run: _merge_ranges(ranges)
+        for run, ranges in sorted(by_run.items(), key=lambda item: int(item[0]))
     }
 
 
-def summarize_datasets(input_dir: Path) -> list[dict]:
+def _iter_brilcalc_rows(path: Path):
+    columns: dict[str, int] = {}
+    with path.open(newline="") as stream:
+        for row in csv.reader(stream):
+            if not row:
+                continue
+            if row[0].lstrip().startswith("#"):
+                header = [column.lstrip("#").strip().lower() for column in row]
+                if header[0] == "run:fill":
+                    columns = {column: idx for idx, column in enumerate(header)}
+                continue
+            try:
+                run_text, fill_text = row[0].split(":", 1)
+                timestamp = datetime.strptime(row[1], BRILCALC_TIME_FORMAT).replace(tzinfo=timezone.utc)
+                yield (
+                    int(run_text),
+                    int(fill_text),
+                    int(timestamp.timestamp()),
+                    float(row[columns["delivered(/fb)"]]),
+                    float(row[columns["recorded(/fb)"]]),
+                )
+            except (IndexError, KeyError, ValueError) as exc:
+                raise RuntimeError(f"Malformed brilcalc row in {path}: {row}") from exc
+
+
+def read_run_meta(path: Path) -> list[tuple[int, int, int, float, float, float]]:
+    by_run: dict[int, tuple[int, int, float, float]] = {}
+    for run, fill, timestamp, delivered, recorded in _iter_brilcalc_rows(path):
+        if run in by_run:
+            previous_fill, previous_timestamp, previous_delivered, previous_recorded = by_run[run]
+            if fill != previous_fill:
+                raise RuntimeError(f"Conflicting fill metadata for run {run}: {previous_fill} != {fill}")
+            timestamp = min(timestamp, previous_timestamp)
+            delivered = max(delivered, previous_delivered)
+            recorded = max(recorded, previous_recorded)
+        by_run[run] = fill, timestamp, delivered, recorded
+
     rows = []
-
-    for dataset_dir in sorted(input_dir.iterdir()):
-        if not dataset_dir.is_dir():
-            continue
-
-        row = dataset_row(dataset_dir)
-        if row is not None:
-            rows.append(row)
-
+    cumulative = 0.0
+    integrated = 0.0
+    for run in sorted(by_run):
+        fill, timestamp, delivered, recorded = by_run[run]
+        cumulative += recorded
+        integrated = max(integrated, cumulative)
+        rows.append((run, fill, timestamp, delivered, recorded, integrated))
     return rows
 
 
-def summarize_group(input_dir: Path, group_key: str, output_dir: Path) -> list[dict]:
-    grouped_processed = defaultdict(list)
-    grouped_golden = defaultdict(list)
-
-    for dataset_dir in sorted(input_dir.iterdir()):
-        if not dataset_dir.is_dir():
-            continue
-
-        dataset = dataset_dir.name
-        try:
-            era, year = parse_dataset_name(dataset)
-        except ValueError:
-            continue
-
-        group_name = era if group_key == "era" else year
-
-        json_path = dataset_dir / "processedLumis.json"
-        json_golden_path = dataset_dir / "processedLumis_Golden.json"
-
-        if not json_path.exists() or not json_golden_path.exists():
-            continue
-
-        grouped_processed[group_name].append(load_lumi_json(json_path))
-        grouped_golden[group_name].append(load_lumi_json(json_golden_path))
-
-    rows = []
-
-    tmp_dir = output_dir / f"_tmp_union_{group_key}"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    for group_name in sorted(grouped_processed):
-        union_processed = union_lumi_json(grouped_processed[group_name])
-        union_golden = union_lumi_json(grouped_golden[group_name])
-
-        json_path = tmp_dir / f"{group_name}.json"
-        json_golden_path = tmp_dir / f"{group_name}_golden.json"
-
-        write_json(json_path, union_processed)
-        write_json(json_golden_path, union_golden)
-
-        delivered_fb, recorded_fb = brilcalc_from_json(json_path)
-        delivered_golden_fb, recorded_golden_fb = brilcalc_from_json(json_golden_path)
-
-        rows.append(
-            {
-                group_key: group_name,
-                "delivered_fb": delivered_fb,
-                "delivered_golden_fb": delivered_golden_fb,
-                "recorded_fb": recorded_fb,
-                "recorded_golden_fb": recorded_golden_fb,
-                "run": len(union_processed),
-                "run_golden": len(union_golden),
-                "ls": count_lumisections(union_processed),
-                "ls_golden": count_lumisections(union_golden),
-            }
-        )
-
-    return rows
+def read_merged_run_meta(
+    paths: Sequence[Path | str | Sequence[Path | str]],
+    normtag: Path | str = DEFAULT_NORMTAG,
+) -> list[tuple[int, int, int, float, float, float]]:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        json_path = tmpdir_path / "processedLumisGoldenUnion.json"
+        csv_path = tmpdir_path / "brilcalc_processed_golden_union.csv"
+        with json_path.open("w") as stream:
+            json.dump(union_golden_lumis(paths), stream, sort_keys=True)
+        command = [
+            "brilcalc", "lumi", "-b", "STABLE BEAMS", "--normtag", str(normtag),
+            "--output-style", "csv", "-u", "/fb", "-i", str(json_path), "-o", str(csv_path),
+        ]
+        process = subprocess.run(command, capture_output=True, text=True, check=False)
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"Command failed: {' '.join(command)}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}"
+            )
+        return read_run_meta(csv_path)
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument(
-        "-i",
-        "--input-dir",
-        required=True,
-        type=Path,
-        help="Directory like logs/lumi/v1",
-    )
-    parser.add_argument(
-        "-o",
-        "--output-dir",
-        default=None,
-        type=Path,
-        help="Default: <input-dir>/summary",
-    )
-    args = parser.parse_args()
+def write_run_meta(path: Path | str, rows: Sequence[tuple[int, int, int, float, float, float]]) -> Path:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = output_path.with_suffix(f"{output_path.suffix}.tmp")
+    with temporary_path.open("w", newline="") as stream:
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(["# Merged run metadata for plotting. One row per run."])
+        writer.writerow(["#run:fill", "time", "delivered(/fb)", "recorded(/fb)", "integrated_recorded(/fb)"])
+        for run, fill, timestamp, delivered, recorded, integrated in rows:
+            time_text = datetime.fromtimestamp(timestamp, timezone.utc).strftime(BRILCALC_TIME_FORMAT)
+            writer.writerow([f"{run}:{fill}", time_text, f"{delivered:.9f}", f"{recorded:.9f}", f"{integrated:.9f}"])
+    temporary_path.replace(output_path)
+    return output_path
 
-    input_dir = args.input_dir
-    output_dir = args.output_dir or (input_dir / "summary")
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset_rows = summarize_datasets(input_dir)
-    era_rows = summarize_group(input_dir, "era", output_dir)
-    year_rows = summarize_group(input_dir, "year", output_dir)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build merged run-level luminosity metadata for later plotting.")
+    parser.add_argument("inputs", nargs="*", type=Path, default=[DEFAULT_INPUT],
+                        help=f"Input golden lumi JSON, directory, or glob. Default: {DEFAULT_INPUT}")
+    parser.add_argument("-o", "--output", type=Path, default=DEFAULT_OUTPUT,
+                        help=f"Merged run metadata CSV. Default: {DEFAULT_OUTPUT}")
+    parser.add_argument("--normtag", type=Path, default=DEFAULT_NORMTAG,
+                        help=f"brilcalc normtag JSON. Default: {DEFAULT_NORMTAG}")
+    return parser.parse_args()
 
-    write_csv(
-        output_dir / "lumi_dataset.csv",
-        dataset_rows,
-        [
-            "dataset",
-            "delivered_fb",
-            "delivered_golden_fb",
-            "recorded_fb",
-            "recorded_golden_fb",
-            "run",
-            "run_golden",
-            "ls",
-            "ls_golden",
-        ],
-    )
 
-    write_csv(
-        output_dir / "lumi_era.csv",
-        era_rows,
-        [
-            "era",
-            "delivered_fb",
-            "delivered_golden_fb",
-            "recorded_fb",
-            "recorded_golden_fb",
-            "run",
-            "run_golden",
-            "ls",
-            "ls_golden",
-        ],
-    )
-
-    write_csv(
-        output_dir / "lumi_year.csv",
-        year_rows,
-        [
-            "year",
-            "delivered_fb",
-            "delivered_golden_fb",
-            "recorded_fb",
-            "recorded_golden_fb",
-            "run",
-            "run_golden",
-            "ls",
-            "ls_golden",
-        ],
-    )
-
-    print(f"[INFO] wrote {output_dir / 'lumi_dataset.csv'}")
-    print(f"[INFO] wrote {output_dir / 'lumi_era.csv'}")
-    print(f"[INFO] wrote {output_dir / 'lumi_year.csv'}")
+def main() -> None:
+    args = parse_args()
+    rows = read_merged_run_meta(args.inputs, args.normtag)
+    output_path = write_run_meta(args.output, rows)
+    print(f"[done] merged {len(rows)} runs: {output_path}", flush=True)
 
 
 if __name__ == "__main__":

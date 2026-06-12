@@ -4,15 +4,11 @@ adapted from https://twiki.cern.ch/twiki/bin/view/CMSPublic/CRAB3AdvancedTutoria
 
 source /cvmfs/cms.cern.ch/common/crab-setup.sh
 """
-from http.client import HTTPException
-import warnings
 from pathlib import Path
 import json
 from typing import Optional
 import getpass
-from datetime import datetime
 import argparse
-from CRABClient.ClientExceptions import ClientException # type: ignore
 from CRABClient.UserUtilities import config as CrabConfig # type: ignore
 from CRABAPI.RawCommand import crabCommand # type: ignore
 
@@ -33,26 +29,23 @@ def submit(config: CrabConfig,
     config.Data.outputDatasetTag = f'{processed}'
     config.General.requestName = f'{pset_stem}_{primary}_{processed}'
 
-    try:
-        print(f"Submitting for {input_dataset=}")
-        crabCommand('submit', config=config)
-    except HTTPException as error:
-        warnings.warn(f"Submission for {input_dataset=} failed: {error}")
-    except ClientException as error:
-        warnings.warn(f"Submission for {input_dataset=} failed: {error}")
+    print(f"Submitting for {input_dataset=}")
+    crabCommand('submit', config=config)
 
     return config
 
 
 def run(pset: Path,
         input_list: list[dict[str, str]],
-        user: str,
-        storage_site: str,
-        name: str,
+        user: Optional[str] = None,
+        storage_site: str = "T3_CH_CERNBOX",
+        name: str = "RPC-TnP-NanoAOD",
         units_per_job: int = 10,
 ):
     """
     """
+    user = getpass.getuser() if user is None else user
+
     config = CrabConfig()
     # General
     config.General.transferLogs = False
@@ -74,20 +67,14 @@ def run(pset: Path,
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument('-p', '--pset', type=Path, help='cfg file')
-    parser.add_argument('-i', '--input', type=Path,
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-p', '--pset', required=True, type=Path, help='cfg file')
+    parser.add_argument('-i', '--input', required=True, type=Path,
                         help='json file containing input datasets')
-    parser.add_argument('-s', '--storage-site', default='T3_CH_CERNBOX',
-                        type=str, help='storage site name')
-    parser.add_argument('-u', '--user', default=getpass.getuser(), type=str,
-                        help='lxplus user id')
-    parser.add_argument('-n', '--name', default='RPC-TnP-NanoAOD', type=str,
-                        help='project name')
-    parser.add_argument('--units-per-job', default=10, type=int,
-                        help='number of files per job')
+    parser.add_argument('-s', '--storage-site', type=str, help='storage site name')
+    parser.add_argument('-u', '--user', type=str, help='lxplus user id')
+    parser.add_argument('-n', '--name', type=str, help='project name')
+    parser.add_argument('--units-per-job', type=int, help='number of files per job')
     args = parser.parse_args()
 
     if not args.pset.exists():
@@ -99,13 +86,12 @@ def main():
     with open(args.input) as stream:
         input_list = json.load(stream)
 
+    kwargs = {key: value for key, value in vars(args).items() if value is not None}
+    kwargs.pop('input')
     run(
         pset=args.pset,
         input_list=input_list,
-        user=args.user,
-        storage_site=args.storage_site,
-        name=args.name,
-        units_per_job=args.units_per_job,
+        **{key: value for key, value in kwargs.items() if key != 'pset'},
     )
 
 

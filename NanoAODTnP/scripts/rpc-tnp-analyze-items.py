@@ -1,11 +1,25 @@
 #!/usr/bin/env python3
 import argparse
 import fnmatch
+import re
 import subprocess
 from pathlib import Path
 
 ENDPOINT = "root://eosuser.cern.ch"
 PATTERN = "output_*.root"
+
+def canonical_eos_path(path: str) -> str:
+    match = re.match(r"^/eos/home-([^/]+)/([^/]+)(/.*)?$", path)
+    if match:
+        tail = match.group(3) or ""
+        return f"/eos/user/{match.group(1)}/{match.group(2)}{tail}"
+    return path
+
+
+def eos_path(path: str) -> str:
+    if path.startswith(ENDPOINT + "//"):
+        path = "/" + path.split("//", 2)[2]
+    return canonical_eos_path(path)
 
 
 def run_cmd(cmd):
@@ -20,23 +34,26 @@ def run_cmd(cmd):
 
 
 def eos_exists(path: str) -> bool:
+    path = eos_path(path)
     ret, _, _ = run_cmd(["xrdfs", ENDPOINT, "stat", path])
     return ret == 0
 
 
 def path_exists(path: str) -> bool:
+    path = eos_path(path)
+    if path.startswith("/eos/"):
+        return eos_exists(path)
     p = Path(path)
-    if p.as_posix().startswith("/eos/"):
-        return eos_exists(p.as_posix())
     return p.exists()
 
 
 def list_files_recursive(base: Path):
-    if base.as_posix().startswith("/eos/"):
-        if not eos_exists(base.as_posix()):
+    base_path = eos_path(base.as_posix())
+    if base_path.startswith("/eos/"):
+        if not eos_exists(base_path):
             return []
 
-        ret, out, err = run_cmd(["xrdfs", ENDPOINT, "ls", "-R", base.as_posix()])
+        ret, out, err = run_cmd(["xrdfs", ENDPOINT, "ls", "-R", base_path])
         if ret != 0:
             raise RuntimeError(
                 f"Failed to list EOS path: {base}\nstdout:\n{out}\nstderr:\n{err}"
@@ -55,15 +72,23 @@ def list_files_recursive(base: Path):
     return sorted(p for p in base.rglob(PATTERN) if p.is_file())
 
 
-def empty_path_from_output(path: str) -> str:
-    p = Path(path)
-    if p.suffix == ".root":
-        return p.with_suffix(".empty").as_posix()
-    return path + ".empty"
+def output_status(output_eos: str) -> str:
+    output_eos = eos_path(output_eos)
+    if not path_exists(output_eos):
+        return "missing"
 
+    import uproot
 
-def terminal_exists(output_eos: str) -> bool:
-    return path_exists(output_eos) or path_exists(empty_path_from_output(output_eos))
+    try:
+        with uproot.open(output_eos) as root_file:
+            required = (
+                "profile_rpc_fiducial_matched_delta_p_by_probe_p",
+                "profile_rpc_fiducial_matched_cls_by_abs_probe_at_rpc_dxdz_station",
+                "profile_rpc_fiducial_matched_cls_by_probe_at_rpc_pt_station",
+            )
+            return "ok" if all(name in root_file for name in required) else "no_hist"
+    except Exception:
+        return "broken"
 
 
 def build_record(input_base: Path, output_base: Path, cert_path: Path, infile: Path):
@@ -72,9 +97,9 @@ def build_record(input_base: Path, output_base: Path, cert_path: Path, infile: P
     dataset_name = input_base.name
 
     return {
-        "input_eos": infile.as_posix(),
-        "cert_path": cert_path.as_posix(),
-        "output_eos": (output_base / rel).as_posix(),
+        "input_eos": eos_path(infile.as_posix()),
+        "cert_path": eos_path(cert_path.as_posix()),
+        "output_eos": eos_path((output_base / rel).as_posix()),
         "pd": pd,
         "dataset_name": dataset_name,
     }
@@ -131,8 +156,9 @@ def cmd_make(args):
         for infile in files
     ]
 
-    if args.max_files > 0:
-        records = records[:args.max_files]
+    max_files = args.max_files or 0
+    if max_files > 0:
+        records = records[:max_files]
 
     write_items(args.items_file, records)
 
@@ -145,11 +171,20 @@ def cmd_make(args):
 
 def cmd_missing(args):
     records = read_items(args.items_all_file)
-    selected = [rec for rec in records if not terminal_exists(rec["output_eos"])]
+    selected = []
+    counts = {}
+    for rec in records:
+        status = output_status(rec["output_eos"])
+        counts[status] = counts.get(status, 0) + 1
+        if status != "ok":
+            selected.append(rec)
 
     write_items(args.items_out_file, selected)
 
     print(f"total={len(records)}")
+    for status in ("ok", "missing", "broken", "no_hist"):
+        if counts.get(status, 0):
+            print(f"{status}={counts[status]}")
     print(f"selected={len(selected)}")
     print(f"items_out_file={args.items_out_file}")
 
@@ -163,7 +198,7 @@ def main():
     p_make.add_argument("output_base", type=Path)
     p_make.add_argument("cert_path", type=Path)
     p_make.add_argument("items_file", type=Path)
-    p_make.add_argument("--max-files", type=int, default=0)
+    p_make.add_argument("--max-files", type=int)
     p_make.set_defaults(func=cmd_make)
 
     p_missing = subparsers.add_parser("missing")
