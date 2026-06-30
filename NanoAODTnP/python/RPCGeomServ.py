@@ -1,11 +1,14 @@
-from dataclasses import dataclass, asdict
-from functools import cache
-from functools import cached_property
+from dataclasses import asdict, dataclass
+from functools import cache, cached_property
+from collections.abc import Mapping
+
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
-import awkward as ak
 from matplotlib.patches import Polygon
+
+
+IRPC_ROLL_PREFIXES = ("RE+3_R1_", "RE-3_R1_", "RE+4_R1_", "RE-4_R1_")
+RPC_GEOMETRY_KEYS = ("region", "ring", "station", "sector", "layer", "subsector", "roll")
 
 
 @cache
@@ -19,28 +22,32 @@ def get_segment(ring: int, station: int, sector: int, subsector: int) -> int:
 
 @cache
 def get_roll_name(region: int, ring: int, station: int, sector: int, layer: int,
-             subsector: int, roll: int
+                  subsector: int, roll: int
 ) -> str:
     """
     https://github.com/cms-sw/cmssw/blob/CMSSW_13_3_0_pre3/Geometry/RPCGeometry/src/RPCGeomServ.cc#L11-L87
     """
     if region == 0:
-        name = f'W{ring:+d}_RB{station}'
+        name = f"W{ring:+d}_RB{station}"
 
         if station <= 2:
-            name += 'in' if layer == 1 else 'out'
+            name += "in" if layer == 1 else "out"
         else:
             if sector == 4 and station == 4:
-                name += ['--', '-', '+', '++'][subsector - 1]
+                name += ["--", "-", "+", "++"][subsector - 1]
             elif (station == 3) or (station == 4 and sector not in (4, 9, 11)):
-                name += '-' if subsector == 1 else '+'
-        name += f'_S{sector:0>2d}_'
-        name += ['Backward', 'Middle', 'Forward'][roll - 1]
+                name += "-" if subsector == 1 else "+"
+        name += f"_S{sector:0>2d}_"
+        name += ["Backward", "Middle", "Forward"][roll - 1]
     else:
         segment = get_segment(ring, station, sector, subsector)
-        name = f'RE{station * region:+d}_R{ring}_CH{segment:0>2d}_'
-        name += ['A', 'B', 'C', 'D', 'E'][roll - 1]
+        name = f"RE{station * region:+d}_R{ring}_CH{segment:0>2d}_"
+        name += ["A", "B", "C", "D", "E"][roll - 1]
     return name
+
+
+def is_irpc_roll_name(roll_name: str) -> bool:
+    return roll_name.startswith(IRPC_ROLL_PREFIXES)
 
 
 @cache
@@ -49,15 +56,12 @@ def get_detector_unit(region: int, station: int, layer: int) -> str:
     adapted from https://gitlab.cern.ch/seyang/RPCDPGAnalysis/-/blob/3d71b88e/SegmentAndTrackOnRPC/python/RPCGeom.py#L113-114
     """
     if region == 0:
-        detector_unit = f'RB{station:d}'
-        if station <= 2:
-            detector_unit += 'in' if layer == 1 else 'out'
-    else:
-        detector_unit = f'RE{region * station:+d}'
-    return detector_unit
+        suffix = ("in" if layer == 1 else "out") if station <= 2 else ""
+        return f"RB{station:d}{suffix}"
+    return f"RE{region * station:+d}"
 
 
-@dataclass(frozen=True, unsafe_hash=True)
+@dataclass(frozen=True)
 class RPCDetId:
     region: int
     ring: int
@@ -69,19 +73,14 @@ class RPCDetId:
 
     @classmethod
     def from_obj(cls, obj):
-        return cls(region=obj.region, ring=obj.ring, station=obj.station,
-                   sector=obj.sector, layer=obj.layer, subsector=obj.subsector,
-                   roll=obj.roll)
-
-    @property
-    def segment(self):
-        return get_segment(ring=self.ring, station=self.station,
-                           sector=self.sector, subsector=self.subsector)
+        value = (lambda key: obj[key]) if isinstance(obj, Mapping) else (lambda key: getattr(obj, key))
+        return cls(region=int(value("region")), ring=int(value("ring")), station=int(value("station")),
+                   sector=int(value("sector")), layer=int(value("layer")), subsector=int(value("subsector")),
+                   roll=int(value("roll")))
 
     @property
     def name(self):
-        kwargs = asdict(self)
-        return get_roll_name(**kwargs)
+        return get_roll_name(**asdict(self))
 
     @property
     def detector_unit(self):
@@ -101,10 +100,10 @@ class RPCRoll:
     z: npt.NDArray[np.float64]
 
     @classmethod
-    def from_row(cls, row: pd.Series):
-        x = row[[f'x{idx}' for idx in range(1, 5)]].to_numpy(np.float64)
-        y = row[[f'y{idx}' for idx in range(1, 5)]].to_numpy(np.float64)
-        z = row[[f'z{idx}' for idx in range(1, 5)]].to_numpy(np.float64)
+    def from_row(cls, row: Mapping[str, object]):
+        x = np.asarray([row[f"x{idx}"] for idx in range(1, 5)], dtype=np.float64)
+        y = np.asarray([row[f"y{idx}"] for idx in range(1, 5)], dtype=np.float64)
+        z = np.asarray([row[f"z{idx}"] for idx in range(1, 5)], dtype=np.float64)
         det_id = RPCDetId.from_obj(row)
         return cls(det_id, x, y, z)
 
@@ -118,33 +117,17 @@ class RPCRoll:
 
     @property
     def polygon(self) -> Polygon:
-        # if barrel
-        if self.id.barrel:
-            xy = np.stack([self.z, self.phi], axis=1)
-        else:
-            xy = np.stack([self.x, self.y], axis=1)
-        return Polygon(xy, closed=True)
+        coordinates = (self.z, self.phi) if self.id.barrel else (self.x, self.y)
+        return Polygon(np.stack(coordinates, axis=1), closed=True)
 
     @property
     def polygon_xlabel(self) -> str:
-        if self.id.barrel:
-            xlabel = r'$z$ [cm]'
-        else:
-            xlabel = r'$x$ [cm]'
-        return xlabel
+        return r"$z$ [cm]" if self.id.barrel else r"$x$ [cm]"
 
     @property
     def polygon_ylabel(self) -> str:
-        if self.id.barrel:
-            ylabel = r'$\phi$ [radian]'
-        else:
-            ylabel = r'$y$ [cm]'
-        return ylabel
+        return r"$\phi$ [radian]" if self.id.barrel else r"$y$ [cm]"
 
     @property
     def polygon_ymax(self):
-        if self.id.barrel:
-            ymax = 7
-        else:
-            ymax = None
-        return ymax
+        return 7 if self.id.barrel else None
