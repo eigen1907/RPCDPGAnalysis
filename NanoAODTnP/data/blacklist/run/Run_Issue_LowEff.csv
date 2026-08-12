@@ -1,0 +1,14 @@
+# Runs with sufficient fiducial statistics and run-wide RPC efficiency failure
+356580  # RPC efficiency: 0.00% (0/5,376)
+395748  # RPC efficiency: 0.00% (0/41,961)
+
+# 2024-04-14 to 2024-04-17: sustained Barrel-wide efficiency drop (~67-70%); Endcap remained nominal (~95%)
+379416  # Barrel efficiency: 69.19%
+379420  # Barrel efficiency: 69.47%
+379425  # Barrel efficiency: 68.91%
+379433  # Barrel efficiency: 67.49%
+379442  # Barrel efficiency: 69.52%
+379454  # Barrel efficiency: 69.28%
+379456  # Barrel efficiency: 69.38%
+379470  # Barrel efficiency: 69.61%
+379530  # Barrel efficiency: 69.73%

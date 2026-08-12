@@ -1,0 +1,146 @@
+# Noisy rolls / efficiency or DQM issue
+355680
+356074
+357478
+358046
+
+# LV power supply board issue
+# O&M hint: 2022-10-19 09:33, W00 S09 LV OFF
+# no overlapping analyzed run in run3.csv
+
+# RPC port errors from CSC hard resets
+360114
+360116
+
+# TwinMux board / power module issue
+360887
+360888
+360889
+360890
+360892
+360895
+# hint: 2022-10-21 ~22:00, W-2 S11 TwinMux
+
+# Trigger tower configuration issue: RPC excluded / blocking trigger
+361050
+361052
+
+# EMTF DQM invalid RPC TP issue
+361105
+
+# Localized noise interval
+365559
+365560
+365561
+365562
+365563
+365564
+365565
+365566
+365567
+365568
+365569
+365570
+365571
+365572
+365573
+365574
+365575
+365576
+365577
+365578
+365579
+365580
+365581
+365582
+365583
+365584
+365585
+365586
+365587
+365588
+365589
+365590
+
+# RPC trigger tower CCU errors
+367355
+367406
+367413
+# hint: 2023-05-12, RB0 Near / YE-1 Far
+
+# RPC HVkill / gas sensor malfunction
+370468
+# note: not in plotting metadata; circulating-mode run
+
+# RPC trigger rack S1F05 / TC_6 power supply issue
+370667
+370717
+370725
+# hint: 2023-07-14/15, S1F05 TC_6
+
+# Gas mixture / HVkill issue
+# no plotting run found
+# hint: 2023-07-21, gas mixture reduction
+
+# EMTF / RPC-input warning issue
+375659
+# hint: 2023-10-25, negative endcap chamber 22
+
+# RPC supervisor / DAQ configure issue
+386006
+386008
+
+# 2024 DT intervention caused RPC LV shutdown
+# no plotting run found
+# hint: 2024-09-23, S4F02 rack
+
+# 2024 hard reset / RPC ports error issue
+386285
+# hint: 2024-09-26 06:54-08:30
+
+# 2024 YE+3 far-side LV board issue
+386604
+# candidate
+# hint: 2024-10-05, YE+3 far side LV
+
+# 2024 endcap HV board issue during injection
+386672
+386673
+# hint: 2024-10-07 22:30
+
+# 2024 hard reset / RPC ports error issue
+# no plotting metadata found
+# hint: 2024-11-11 06:00-07:00
+
+# W-2 empty due to YB-2 TwinMux power module issue
+388316
+388317
+388318
+388319
+388320
+388321
+388322
+388323
+388324
+388325
+388326
+388327
+388328
+388329
+388330
+388331
+388332
+388333
+388334
+388335
+388336
+388337
+388338
+388339
+388340
+388341
+388342
+388343
+388344
+388345
+388346
