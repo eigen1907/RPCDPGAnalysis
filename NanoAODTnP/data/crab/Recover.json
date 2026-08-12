@@ -1,5 +1,11 @@
 [
     {
-        "input_dataset": "/Muon0/Run2025C-PromptReco-v2/AOD"
+        "input_dataset": "/Muon/Run2022D-27Jun2023-v2/AOD"
+    },
+    {
+        "input_dataset": "/Muon0/Run2024I-PromptReco-v1/AOD"
+    },
+    {
+        "input_dataset": "/Muon1/Run2024G-PromptReco-v1/AOD"
     }
 ]
