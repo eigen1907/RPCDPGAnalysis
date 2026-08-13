@@ -4,3 +4,4 @@ core.*
 *.swp
 *.png
 logs/
+/NanoAODTnP/plots*/
