@@ -9,11 +9,13 @@ from RPCDPGAnalysis.NanoAODTnP.PlotUtils import (  # type: ignore
     add_tag_and_probe_label,
     annotate_count_scale,
     build_year_label,
+    cms_year_label,
     combine_dataset_specs,
     comparison_output_dir,
     count_scale,
     draw_binned_stairs,
     draw_year_summary,
+    histogram_y_label,
     new_figure,
     save_binned_value_map,
     save_figure,
@@ -43,6 +45,7 @@ PAIR_1D = [
         "edges": PAIR_MASS_EDGES,
         "xlabel": r"$\mu^{+}\mu^{-}$ (Tag-Probe) invariant mass [$\mathrm{GeV}$]",
         "ylabel": "Events",
+        "unit": r"$\mathrm{GeV}$",
         "y_margin": 1.20,
     },
     {
@@ -52,6 +55,7 @@ PAIR_1D = [
         "edges": PAIR_MUON_PT_EDGES,
         "xlabel": r"Probe Muon $p_{T}$ [$\mathrm{GeV}$]",
         "ylabel": "Events",
+        "unit": r"$\mathrm{GeV}$",
         "y_margin": 1.20,
     },
     {
@@ -70,6 +74,7 @@ PAIR_1D = [
         "edges": PAIR_MUON_PHI_EDGES,
         "xlabel": r"Probe Muon $\phi$",
         "ylabel": "Events",
+        "unit": r"$\mathrm{rad}$",
         "y_margin": 1.35,
     },
     {
@@ -79,6 +84,7 @@ PAIR_1D = [
         "edges": PAIR_MUON_Q_OVER_P_EDGES,
         "xlabel": r"Probe Muon $q/p$ [$\mathrm{GeV}^{-1}$]",
         "ylabel": "Events",
+        "unit": r"$\mathrm{GeV}^{-1}$",
         "y_margin": 1.35,
     },
     {
@@ -88,6 +94,7 @@ PAIR_1D = [
         "edges": PAIR_MUON_PT_EDGES,
         "xlabel": r"Tag Muon $p_{T}$ [$\mathrm{GeV}$]",
         "ylabel": "Events",
+        "unit": r"$\mathrm{GeV}$",
         "y_margin": 1.20,
     },
     {
@@ -106,6 +113,7 @@ PAIR_1D = [
         "edges": PAIR_MUON_PHI_EDGES,
         "xlabel": r"Tag Muon $\phi$",
         "ylabel": "Events",
+        "unit": r"$\mathrm{rad}$",
         "y_margin": 1.35,
     },
 ]
@@ -152,10 +160,11 @@ PAIR_2D = [
 
 def draw_count_hist1d(results, plot: dict, output: Path, label: str, com: float, ext: str) -> Path:
     print(f"[info] plotting {plot['output']}", flush=True)
-    fig, ax = new_figure(label, com)
+    combined_spec = combine_dataset_specs([spec for spec, _ in results])
+    fig, ax = new_figure(label, com, year=cms_year_label(combined_spec.year))
     add_tag_and_probe_label(ax)
     ax.set_xlabel(plot["xlabel"], fontsize=22)
-    ax.set_ylabel(plot["ylabel"], fontsize=22)
+    ax.set_ylabel(histogram_y_label(plot["ylabel"], plot["edges"], plot.get("unit")), fontsize=22)
     ax.set_xlim(float(plot["edges"][0]), float(plot["edges"][-1]))
     max_count = max((float(np.max(result.counts)) for _, result in results if len(result.counts)), default=0.0)
     scale_exp, scale = count_scale(max_count)
@@ -184,7 +193,7 @@ def draw_count_hist2d(results, plot: dict, output: Path, label: str, com: float,
         first.y_edges,
         plot["xlabel"],
         plot["ylabel"],
-        "Events",
+        "Events / bin",
         output,
         plot["output"],
         label,

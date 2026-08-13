@@ -37,6 +37,7 @@ from RPCDPGAnalysis.NanoAODTnP.PlotUtils import (  # type: ignore
     draw_errorbar_series,
     draw_point_series,
     elapsed_weeks_since_run3_start,
+    histogram_y_label,
     new_figure,
     plot_group_label,
     plot_output_dir,
@@ -185,7 +186,8 @@ def draw_efficiency_1d(results, plot: dict, output: Path, label: str, com: float
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}", flush=True)
-    fig, ax = new_figure(label, com)
+    combined_spec = combine_dataset_specs([spec for spec, _ in results])
+    fig, ax = new_figure(label, com, year=cms_year_label(combined_spec.year))
     add_panel_label(ax, plot["panel_label"])
     add_tag_and_probe_label(ax)
     ax.set_xlabel(plot["xlabel"], fontsize=22)
@@ -339,11 +341,12 @@ def draw_run_index_efficiency(result_by_key, plot: dict, spec, output: Path, lab
 def draw_nrolls_efficiency(results, region: str, output: Path, label: str, com: float, ext: str) -> Path:
     output_name = "nrolls-eff"
     print(f"[info] plotting {variant_output_label(output_name, region)}", flush=True)
-    fig, ax = new_figure(label, com)
+    combined_spec = combine_dataset_specs([spec for spec, _ in results])
+    fig, ax = new_figure(label, com, year=cms_year_label(combined_spec.year))
     add_panel_label(ax, plot_group_label(region))
     add_tag_and_probe_label(ax)
     ax.set_xlabel("Efficiency [%]", fontsize=22)
-    ax.set_ylabel("Number of Rolls", fontsize=22)
+    ax.set_ylabel(histogram_y_label("Number of Rolls", EFFICIENCY_ROLL_EDGES, "%"), fontsize=22)
     ax.set_xlim(DEFAULT_EFF_THRESHOLD, 100.0)
     summary_rows: list[tuple[str, str, float, float]] = []
     max_count = 0.0
@@ -456,8 +459,14 @@ def save_efficiency_2d_components(
     denominator_name = output_name.replace("eff-", "denom-", 1)
     numerator_name = output_name.replace("eff-", "numer-", 1)
     return [
-        save_efficiency_2d_count(total, x_edges, y_edges, output, denominator_name, group, xlabel, ylabel, "Denominator", spec, label, com, ext),
-        save_efficiency_2d_count(passed, x_edges, y_edges, output, numerator_name, group, xlabel, ylabel, "Numerator", spec, label, com, ext),
+        save_efficiency_2d_count(
+            total, x_edges, y_edges, output, denominator_name, group, xlabel, ylabel,
+            "Denominator Events / bin", spec, label, com, ext,
+        ),
+        save_efficiency_2d_count(
+            passed, x_edges, y_edges, output, numerator_name, group, xlabel, ylabel,
+            "Numerator Events / bin", spec, label, com, ext,
+        ),
     ]
 
 

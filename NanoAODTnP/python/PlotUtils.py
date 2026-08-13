@@ -63,8 +63,8 @@ def combine_dataset_specs(specs: Sequence[DatasetSpec]) -> DatasetSpec:
     )
 
 
-def cms_year_label(year: int | str) -> int | str | None:
-    return None if str(year) == "3" else year
+def cms_year_label(year: int | str) -> int | str:
+    return "Run 3" if str(year) == "3" else year
 
 
 def add_cms_label(ax: plt.Axes, label: str, com: float, lumi: float | None = None, year: int | str | None = None) -> None:
@@ -170,9 +170,10 @@ def new_figure(
     cms_label: str,
     com_energy: float,
     figsize: tuple[float, float] = (12, 8),
+    year: int | str | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
     fig, ax = plt.subplots(figsize=figsize)
-    add_cms_label(ax=ax, label=cms_label, com=com_energy)
+    add_cms_label(ax=ax, label=cms_label, com=com_energy, year=year)
     return fig, ax
 
 
@@ -271,6 +272,20 @@ def bin_centers(edges: np.ndarray) -> np.ndarray:
 
 def bin_half_widths(edges: np.ndarray) -> np.ndarray:
     return 0.5 * np.diff(edges)
+
+
+def histogram_y_label(label: str, edges: np.ndarray, unit: str | None = None) -> str:
+    widths = np.diff(np.asarray(edges, dtype=np.float64))
+    if len(widths) == 0 or not np.allclose(widths, widths[0]):
+        return f"{label} / bin"
+    width = float(widths[0])
+    if unit is None and np.isclose(width, 1.0):
+        return f"{label} / bin"
+    denominator = f"{width:.3g}"
+    if unit:
+        separator = "" if unit == "%" else " "
+        denominator = f"{denominator}{separator}{unit}"
+    return f"{label} / {denominator}"
 
 
 def count_scale(max_count: float) -> tuple[int, float]:

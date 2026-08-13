@@ -36,6 +36,7 @@ from RPCDPGAnalysis.NanoAODTnP.PlotUtils import (  # type: ignore
     draw_year_rms_summary,
     draw_year_summary,
     elapsed_weeks_since_run3_start,
+    histogram_y_label,
     new_figure,
     plot_group_label,
     plot_output_dir,
@@ -78,7 +79,8 @@ for group in PLOT_GROUPS:
         "branch": "residual_x",
         "edges": RESIDUAL_X_EDGES,
         "xlabel": r"Residual $x$ [cm]",
-        "ylabel": "Normalized",
+        "ylabel": "Normalized Events",
+        "unit": r"$\mathrm{cm}$",
         "region": group,
         "selection": "match",
         "log_scale": False,
@@ -92,7 +94,7 @@ for group in PLOT_GROUPS:
         "branch": "cls",
         "edges": CLS_EDGES,
         "xlabel": "Cluster Size",
-        "ylabel": "Normalized",
+        "ylabel": "Normalized Events",
         "region": group,
         "selection": "match",
         "log_scale": False,
@@ -108,7 +110,7 @@ for group in PLOT_GROUPS:
         "branch": "bx",
         "edges": BX_EDGES,
         "xlabel": "Bunch Crossing",
-        "ylabel": "Normalized",
+        "ylabel": "Normalized Events",
         "region": group,
         "selection": "match",
         "log_scale": False,
@@ -123,7 +125,7 @@ for group in PLOT_GROUPS:
         "branch": "bx",
         "edges": BX_EDGES,
         "xlabel": "Bunch Crossing",
-        "ylabel": "Normalized",
+        "ylabel": "Normalized Events",
         "region": group,
         "selection": "match",
         "log_scale": True,
@@ -230,12 +232,13 @@ def draw_count_plot(results, plot: dict, output: Path, label: str, com: float, e
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}", flush=True)
-    fig, ax = new_figure(label, com)
+    combined_spec = combine_dataset_specs([spec for spec, _ in results])
+    fig, ax = new_figure(label, com, year=cms_year_label(combined_spec.year))
     if "panel_label" in plot:
         add_panel_label(ax, plot["panel_label"])
     add_tag_and_probe_label(ax)
     ax.set_xlabel(plot["xlabel"], fontsize=22)
-    ax.set_ylabel(plot["ylabel"], fontsize=22)
+    ax.set_ylabel(histogram_y_label(plot["ylabel"], plot["edges"], plot.get("unit")), fontsize=22)
     xlim = plot.get("xlim", (float(plot["edges"][0]), float(plot["edges"][-1])))
     ax.set_xlim(*xlim)
     if "x_ticks" in plot:
@@ -282,7 +285,8 @@ def draw_mean_plot(results, plot: dict, output: Path, label: str, com: float, ex
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}", flush=True)
-    fig, ax = new_figure(label, com)
+    combined_spec = combine_dataset_specs([spec for spec, _ in results])
+    fig, ax = new_figure(label, com, year=cms_year_label(combined_spec.year))
     add_panel_label(ax, plot["panel_label"])
     add_tag_and_probe_label(ax)
     ax.set_xlabel(plot["xlabel"], fontsize=22)
@@ -310,7 +314,8 @@ def draw_rms_plot(results, plot: dict, output: Path, label: str, com: float, ext
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}", flush=True)
-    fig, ax = new_figure(label, com)
+    combined_spec = combine_dataset_specs([spec for spec, _ in results])
+    fig, ax = new_figure(label, com, year=cms_year_label(combined_spec.year))
     add_panel_label(ax, plot["panel_label"])
     add_tag_and_probe_label(ax)
     ax.set_xlabel(plot["xlabel"], fontsize=22)
