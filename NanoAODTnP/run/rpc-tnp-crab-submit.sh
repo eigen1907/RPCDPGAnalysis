@@ -6,7 +6,7 @@ WORK_DIR="${CMSSW_BASE}/src/RPCDPGAnalysis/NanoAODTnP"
 
 exec python3 "${WORK_DIR}/scripts/rpc-tnp-crab-submit.py" \
     --pset "${WORK_DIR}/test/muRPCTnPFlatTableProducer_cfg.py" \
-    --input "${WORK_DIR}/data/crab/Recover.json" \
+    --input "${WORK_DIR}/data/crab/Run3.json" \
     --storage-site T3_CH_CERNBOX \
     --user joshin \
     --name rpc/tnp \
