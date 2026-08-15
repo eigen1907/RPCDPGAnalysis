@@ -37,7 +37,6 @@ from RPCDPGAnalysis.NanoAODTnP.PlotUtils import (  # type: ignore
     draw_errorbar_series,
     draw_point_series,
     elapsed_weeks_since_run3_start,
-    histogram_y_label,
     new_figure,
     plot_group_label,
     plot_output_dir,
@@ -346,7 +345,7 @@ def draw_nrolls_efficiency(results, region: str, output: Path, label: str, com: 
     add_panel_label(ax, plot_group_label(region))
     add_tag_and_probe_label(ax)
     ax.set_xlabel("Efficiency [%]", fontsize=22)
-    ax.set_ylabel(histogram_y_label("Number of Rolls", EFFICIENCY_ROLL_EDGES, "%"), fontsize=22)
+    ax.set_ylabel("Number of Rolls", fontsize=22)
     ax.set_xlim(DEFAULT_EFF_THRESHOLD, 100.0)
     summary_rows: list[tuple[str, str, float, float]] = []
     max_count = 0.0

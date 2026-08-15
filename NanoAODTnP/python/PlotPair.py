@@ -165,6 +165,7 @@ def draw_count_hist1d(results, plot: dict, output: Path, label: str, com: float,
     add_tag_and_probe_label(ax)
     ax.set_xlabel(plot["xlabel"], fontsize=22)
     ax.set_ylabel(histogram_y_label(plot["ylabel"], plot["edges"], plot.get("unit")), fontsize=22)
+    ax.yaxis.label.set_y(0.94)
     ax.set_xlim(float(plot["edges"][0]), float(plot["edges"][-1]))
     max_count = max((float(np.max(result.counts)) for _, result in results if len(result.counts)), default=0.0)
     scale_exp, scale = count_scale(max_count)
@@ -172,7 +173,7 @@ def draw_count_hist1d(results, plot: dict, output: Path, label: str, com: float,
         draw_binned_stairs(ax, result.counts, result.edges, color=year_color(spec.year, idx), label="_nolegend_", scale=scale)
     if max_count > 0.0:
         ax.set_ylim(0.0, plot["y_margin"] * max_count / scale)
-    annotate_count_scale(ax, scale_exp)
+    annotate_count_scale(ax, scale_exp, y=0.965)
     draw_year_summary(ax, [
         (year_color(spec.year, idx), build_year_label(spec.year, spec.lumi))
         for idx, (spec, result) in enumerate(results)

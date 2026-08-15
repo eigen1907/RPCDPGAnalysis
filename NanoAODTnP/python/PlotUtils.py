@@ -67,12 +67,23 @@ def cms_year_label(year: int | str) -> int | str:
     return "Run 3" if str(year) == "3" else year
 
 
-def add_cms_label(ax: plt.Axes, label: str, com: float, lumi: float | None = None, year: int | str | None = None) -> None:
+def add_cms_label(
+    ax: plt.Axes,
+    label: str,
+    com: float,
+    lumi: float | None = None,
+    year: int | str | None = None,
+    lumi_first: bool = False,
+) -> None:
     if lumi is None:
         mh.cms.label(ax=ax, llabel=label, year=year, com=com)
         return
-    year_text = "" if year is None else f"{year}, "
-    right_label = rf"{year_text}{float(lumi):.1f} fb$^{{-1}}$ ({float(com):g} TeV)"
+    if lumi_first:
+        year_text = "" if year is None else f", {year}"
+        right_label = rf"{float(lumi):.1f} fb$^{{-1}}${year_text} ({float(com):g} TeV)"
+    else:
+        year_text = "" if year is None else f"{year}, "
+        right_label = rf"{year_text}{float(lumi):.1f} fb$^{{-1}}$ ({float(com):g} TeV)"
     mh.cms.label(ax=ax, llabel=label, rlabel=right_label)
 
 
@@ -261,7 +272,7 @@ def save_binned_value_map(
     ax.set_ylabel(ylabel, fontsize=22)
     cbar = fig.colorbar(mesh, ax=ax, pad=0.02)
     cbar.set_label(value_label, fontsize=20)
-    add_cms_label(ax, label, com, lumi=lumi, year=cms_year_label(year))
+    add_cms_label(ax, label, com, lumi=lumi, year=cms_year_label(year), lumi_first=True)
     fig.tight_layout()
     return save_figure(fig, output, output_name, ext)
 
@@ -293,11 +304,15 @@ def count_scale(max_count: float) -> tuple[int, float]:
     return scale_exp, 10.0 ** scale_exp
 
 
-def annotate_count_scale(ax: plt.Axes, scale_exp: int) -> None:
+def annotate_count_scale(
+    ax: plt.Axes,
+    scale_exp: int,
+    y: float = 1.0,
+) -> None:
     if scale_exp != 0:
         ax.annotate(
             rf"$x10^{{{scale_exp}}}$",
-            (-0.06, 1.0),
+            (-0.06, y),
             xycoords="axes fraction",
             fontsize=18,
             horizontalalignment="left",

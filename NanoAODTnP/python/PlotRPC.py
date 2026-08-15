@@ -79,7 +79,7 @@ for group in PLOT_GROUPS:
         "branch": "residual_x",
         "edges": RESIDUAL_X_EDGES,
         "xlabel": r"Residual $x$ [cm]",
-        "ylabel": "Normalized Events",
+        "ylabel": "Normalized",
         "unit": r"$\mathrm{cm}$",
         "region": group,
         "selection": "match",
@@ -94,7 +94,7 @@ for group in PLOT_GROUPS:
         "branch": "cls",
         "edges": CLS_EDGES,
         "xlabel": "Cluster Size",
-        "ylabel": "Normalized Events",
+        "ylabel": "Normalized",
         "region": group,
         "selection": "match",
         "log_scale": False,
@@ -110,7 +110,7 @@ for group in PLOT_GROUPS:
         "branch": "bx",
         "edges": BX_EDGES,
         "xlabel": "Bunch Crossing",
-        "ylabel": "Normalized Events",
+        "ylabel": "Normalized",
         "region": group,
         "selection": "match",
         "log_scale": False,
@@ -125,7 +125,7 @@ for group in PLOT_GROUPS:
         "branch": "bx",
         "edges": BX_EDGES,
         "xlabel": "Bunch Crossing",
-        "ylabel": "Normalized Events",
+        "ylabel": "Normalized",
         "region": group,
         "selection": "match",
         "log_scale": True,
@@ -238,12 +238,18 @@ def draw_count_plot(results, plot: dict, output: Path, label: str, com: float, e
         add_panel_label(ax, plot["panel_label"])
     add_tag_and_probe_label(ax)
     ax.set_xlabel(plot["xlabel"], fontsize=22)
-    ax.set_ylabel(histogram_y_label(plot["ylabel"], plot["edges"], plot.get("unit")), fontsize=22)
+    normalized = plot.get("normalize", False)
+    ylabel = (
+        plot["ylabel"]
+        if normalized
+        else histogram_y_label(plot["ylabel"], plot["edges"], plot.get("unit"))
+    )
+    ax.set_ylabel(ylabel, fontsize=22)
     xlim = plot.get("xlim", (float(plot["edges"][0]), float(plot["edges"][-1])))
     ax.set_xlim(*xlim)
     if "x_ticks" in plot:
         ax.set_xticks(plot["x_ticks"])
-    if plot.get("normalize", False):
+    if normalized:
         _draw_normalized_counts(ax, results, plot)
     else:
         _draw_raw_counts(ax, results, plot)
