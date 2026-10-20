@@ -172,6 +172,7 @@ PLOT_OUTPUT_DIR="$PWD/plots/publication" \
 PLOT_FORMATS="png eps" bash run/rpc-tnp-plot.sh
 ```
 
+EPS omits the CMS `Preliminary` suffix; PNG and PDF retain the selected label.
 EPS keeps text, axes, and curves as vectors. Heatmaps are embedded as raster
 images to preserve their transparent bin edges. By default, PNG and embedded
 raster resolution follow the current Matplotlib settings. Set `PLOT_DPI=600`

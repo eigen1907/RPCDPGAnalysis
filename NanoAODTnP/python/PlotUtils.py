@@ -14,6 +14,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Polygon, Rectangle, StepPatch
 from matplotlib.ticker import LogLocator, MaxNLocator, MultipleLocator, NullFormatter
 from matplotlib.transforms import blended_transform_factory
+from mplhep.label import ExpSuffix
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 CMS_P6 = [
@@ -237,14 +238,23 @@ def save_figure(
             # labels, axes, and curves remain vector graphics.
             meshes = fig.findobj(match=QuadMesh) if ext == "eps" else []
             rasterized = [(mesh, mesh.get_rasterized()) for mesh in meshes]
+            preliminary_labels = [
+                (artist, artist.get_visible())
+                for artist in fig.findobj(match=ExpSuffix)
+                if artist.get_text().strip().casefold() == "preliminary"
+            ] if ext == "eps" else []
             try:
                 for mesh, _ in rasterized:
                     mesh.set_rasterized(True)
+                for artist, _ in preliminary_labels:
+                    artist.set_visible(False)
                 with plt.rc_context({"ps.fonttype": 42, "pdf.fonttype": 42}):
                     fig.savefig(output_path)
             finally:
                 for mesh, original in rasterized:
                     mesh.set_rasterized(original)
+                for artist, original in preliminary_labels:
+                    artist.set_visible(original)
             print(f"[done] saved: {output_path}", flush=True)
     finally:
         plt.close(fig)
