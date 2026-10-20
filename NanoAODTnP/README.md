@@ -169,13 +169,14 @@ Set `PLOT_OUTPUT_DIR` to use an exact output directory instead of the default
 
 ```sh
 PLOT_OUTPUT_DIR="$PWD/plots/publication" \
-PLOT_FORMATS="png eps" PLOT_DPI=600 bash run/rpc-tnp-plot.sh
+PLOT_FORMATS="png eps" bash run/rpc-tnp-plot.sh
 ```
 
 EPS keeps text, axes, and curves as vectors. Heatmaps are embedded as raster
-images to preserve their transparent bin edges. `PLOT_DPI` controls PNG and
-embedded raster resolution (default: 300). The Python command accepts the same
-settings as `--ext png eps --dpi 600`.
+images to preserve their transparent bin edges. By default, PNG and embedded
+raster resolution follow the current Matplotlib settings. Set `PLOT_DPI=600`
+to override the resolution explicitly. The Python command accepts the same
+settings as `--ext png eps`, with an optional `--dpi 600` override.
 
 Tight-match plots read `tnp-hist-tight-merged` and write
 `plots/tight-match`. Add `--no-blacklist` to select

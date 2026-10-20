@@ -29,7 +29,7 @@ def plot_all(
     roll_maps: bool = False,
     show_excluded_rolls: bool = True,
     probe_pt_gt15: bool = True,
-    dpi: int = 300,
+    dpi: int | None = None,
 ) -> list[Path]:
     specs = build_dataset_specs(input_groups, years, lumis)
     histograms_by_spec = {spec: load_histograms(spec) for spec in specs}
@@ -50,7 +50,7 @@ def plot_all(
     }
     paths: list[Path] = []
 
-    with plt.rc_context({"savefig.dpi": dpi}):
+    with plt.rc_context({"savefig.dpi": dpi} if dpi is not None else {}):
         print("=" * 60, flush=True)
         print("[plot] rpc", flush=True)
         paths.extend(

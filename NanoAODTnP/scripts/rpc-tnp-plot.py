@@ -24,8 +24,8 @@ def add_dataset_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-l", "--label", default="Preliminary", help="CMS extra label.")
     parser.add_argument("--ext", choices=["png", "pdf", "eps"], nargs="+", default=["png"],
                         help="Output formats, for example --ext png eps.")
-    parser.add_argument("--dpi", type=int, default=300,
-                        help="PNG and rasterized EPS resolution in dots per inch. Default: 300.")
+    parser.add_argument("--dpi", type=int, default=None,
+                        help="Override PNG and rasterized EPS DPI. Default: use Matplotlib settings.")
     parser.add_argument("--yearly-2d", action="store_true",
                         help="Also draw per-year efficiency and mean-CLS 2D plots under RunYYYY.")
     parser.add_argument("--efficiency-maps", action="store_true",
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if not (len(args.input_groups) == len(args.years) == len(args.lumis)):
         parser.error("--input, --year, and --lumi must be repeated the same number of times")
-    if args.dpi <= 0:
+    if args.dpi is not None and args.dpi <= 0:
         parser.error("--dpi must be positive")
     return args
 

@@ -33,7 +33,7 @@ Environment overrides:
   PLOT_OUTPUT_BASE            Plot output base directory
   PLOT_OUTPUT_DIR             Exact output directory; overrides PLOT_OUTPUT_BASE/mode
   PLOT_FORMATS                Space-separated output formats: png pdf eps (default: png)
-  PLOT_DPI                    Output resolution in DPI (default: 300)
+  PLOT_DPI                    Optional DPI override; unset uses Matplotlib settings
   RUN3_YEARS                  Space-separated year list
   RUN_META_PATH               Run metadata CSV path
   RUN_BLACKLIST_PATH          Run blacklist used for displayed luminosities
@@ -191,7 +191,10 @@ run_plot_campaign() {
         -g "${GEOM_PATH}"
         --run-meta-path "${RUN_META_PATH}"
     )
-    cmd+=(--ext "${plot_formats[@]}" --dpi "${PLOT_DPI:-300}")
+    cmd+=(--ext "${plot_formats[@]}")
+    if [[ -n "${PLOT_DPI:-}" ]]; then
+        cmd+=(--dpi "${PLOT_DPI}")
+    fi
 
     echo "============================================================"
     echo "[plot-campaign] ${label}"
