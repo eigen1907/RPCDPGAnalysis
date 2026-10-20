@@ -7,7 +7,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import mplhep as mh
 import numpy as np
-from matplotlib.collections import PatchCollection
+from matplotlib.collections import PatchCollection, QuadMesh
 from matplotlib.colors import Colormap
 from matplotlib.container import ErrorbarContainer
 from matplotlib.lines import Line2D
@@ -63,8 +63,8 @@ def combine_dataset_specs(specs: Sequence[DatasetSpec]) -> DatasetSpec:
     )
 
 
-def cms_year_label(year: int | str) -> int | str:
-    return "Run 3" if str(year) == "3" else year
+def cms_year_label(year: int | str) -> int | str | None:
+    return None if str(year) == "3" else year
 
 
 def add_cms_label(
@@ -222,14 +222,33 @@ def save_figure(
     fig: plt.Figure,
     output_dir: Path,
     output_name: str,
-    output_ext: str,
+    output_ext: str | Sequence[str],
 ) -> Path:
+    """Save every requested format and return the first output path."""
+    formats = (output_ext,) if isinstance(output_ext, str) else tuple(output_ext)
+    formats = tuple(dict.fromkeys(ext.lstrip(".").lower() for ext in formats))
+    if not formats:
+        raise ValueError("At least one output format is required")
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{output_name}.{output_ext.lstrip('.')}"
-    fig.savefig(output_path)
-    plt.close(fig)
-    print(f"[done] saved: {output_path}", flush=True)
-    return output_path
+    output_paths = [output_dir / f"{output_name}.{ext}" for ext in formats]
+    try:
+        for ext, output_path in zip(formats, output_paths):
+            # EPS cannot blend transparent mesh edges. Rasterize only the meshes;
+            # labels, axes, and curves remain vector graphics.
+            meshes = fig.findobj(match=QuadMesh) if ext == "eps" else []
+            rasterized = [(mesh, mesh.get_rasterized()) for mesh in meshes]
+            try:
+                for mesh, _ in rasterized:
+                    mesh.set_rasterized(True)
+                with plt.rc_context({"ps.fonttype": 42, "pdf.fonttype": 42}):
+                    fig.savefig(output_path)
+            finally:
+                for mesh, original in rasterized:
+                    mesh.set_rasterized(original)
+            print(f"[done] saved: {output_path}", flush=True)
+    finally:
+        plt.close(fig)
+    return output_paths[0]
 
 
 def save_binned_value_map(
@@ -245,7 +264,7 @@ def save_binned_value_map(
     com: float,
     lumi: float,
     year: int | str,
-    ext: str,
+    ext: str | Sequence[str],
     cmap: Colormap | str,
     vmin: float,
     vmax: float,
@@ -270,7 +289,7 @@ def save_binned_value_map(
     )
     ax.set_xlabel(xlabel, fontsize=22)
     ax.set_ylabel(ylabel, fontsize=22)
-    cbar = fig.colorbar(mesh, ax=ax, pad=0.02)
+    cbar = fig.colorbar(mesh, ax=ax, pad=0.05)
     cbar.set_label(value_label, fontsize=20)
     add_cms_label(ax, label, com, lumi=lumi, year=cms_year_label(year), lumi_first=True)
     fig.tight_layout()
@@ -594,7 +613,7 @@ def draw_roll_map(
     return cax
 
 
-def save_roll_value_map(result, output: Path, year: int | str, label: str, com: float, lumi: float, ext: str) -> Path:
+def save_roll_value_map(result, output: Path, year: int | str, label: str, com: float, lumi: float, ext: str | Sequence[str]) -> Path:
     print(f"[info] plotting {result.detector_unit}", flush=True)
     fig, ax = plt.subplots(figsize=(12, 9))
     is_barrel = result.rolls[0].id.barrel

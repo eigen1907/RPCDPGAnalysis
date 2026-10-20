@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 
+import matplotlib.pyplot as plt
+
 from RPCDPGAnalysis.NanoAODTnP.HistIO import load_histograms  # type: ignore
 from RPCDPGAnalysis.NanoAODTnP.PlotEfficiency import plot_efficiency  # type: ignore
 from RPCDPGAnalysis.NanoAODTnP.PlotPair import plot_pair  # type: ignore
@@ -21,12 +23,13 @@ def plot_all(
     run_meta_path: Path,
     com: float = 13.6,
     label: str = "Preliminary",
-    ext: str = "png",
+    ext: str | Sequence[str] = "png",
     yearly_2d: bool = False,
     efficiency_maps: bool = False,
     roll_maps: bool = False,
     show_excluded_rolls: bool = True,
     probe_pt_gt15: bool = True,
+    dpi: int = 300,
 ) -> list[Path]:
     specs = build_dataset_specs(input_groups, years, lumis)
     histograms_by_spec = {spec: load_histograms(spec) for spec in specs}
@@ -47,33 +50,34 @@ def plot_all(
     }
     paths: list[Path] = []
 
-    print("=" * 60, flush=True)
-    print("[plot] rpc", flush=True)
-    paths.extend(
-        plot_rpc(
-            **common,
-            geom=geom,
-            run_meta=run_meta,
-            draw_yearly_2d=yearly_2d,
-            draw_roll_maps=roll_maps,
-            show_excluded_rolls=show_excluded_rolls,
+    with plt.rc_context({"savefig.dpi": dpi}):
+        print("=" * 60, flush=True)
+        print("[plot] rpc", flush=True)
+        paths.extend(
+            plot_rpc(
+                **common,
+                geom=geom,
+                run_meta=run_meta,
+                draw_yearly_2d=yearly_2d,
+                draw_roll_maps=roll_maps,
+                show_excluded_rolls=show_excluded_rolls,
+            )
         )
-    )
 
-    print("=" * 60, flush=True)
-    print("[plot] efficiency", flush=True)
-    paths.extend(
-        plot_efficiency(
-            **common,
-            geom=geom,
-            run_meta=run_meta,
-            draw_yearly_2d=yearly_2d,
-            draw_roll_maps=efficiency_maps,
-            show_excluded_rolls=show_excluded_rolls,
+        print("=" * 60, flush=True)
+        print("[plot] efficiency", flush=True)
+        paths.extend(
+            plot_efficiency(
+                **common,
+                geom=geom,
+                run_meta=run_meta,
+                draw_yearly_2d=yearly_2d,
+                draw_roll_maps=efficiency_maps,
+                show_excluded_rolls=show_excluded_rolls,
+            )
         )
-    )
 
-    print("=" * 60, flush=True)
-    print("[plot] pair", flush=True)
-    paths.extend(plot_pair(**common))
+        print("=" * 60, flush=True)
+        print("[plot] pair", flush=True)
+        paths.extend(plot_pair(**common))
     return paths

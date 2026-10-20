@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -228,7 +229,7 @@ def _hist1d_rms(result) -> float:
     return float(np.sqrt(max(variance, 0.0)))
 
 
-def draw_count_plot(results, plot: dict, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_count_plot(results, plot: dict, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}", flush=True)
@@ -287,7 +288,7 @@ def draw_count_plot(results, plot: dict, output: Path, label: str, com: float, e
     return save_figure(fig, output_dir, file_name, ext)
 
 
-def draw_mean_plot(results, plot: dict, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_mean_plot(results, plot: dict, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}", flush=True)
@@ -316,7 +317,7 @@ def draw_mean_plot(results, plot: dict, output: Path, label: str, com: float, ex
     return save_figure(fig, output_dir, file_name, ext)
 
 
-def draw_rms_plot(results, plot: dict, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_rms_plot(results, plot: dict, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}", flush=True)
@@ -363,7 +364,7 @@ def save_cls_2d(
     spec,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
 ) -> Path:
     mean = np.divide(value_sum, counts, out=np.full_like(value_sum, np.nan, dtype=np.float64), where=counts > 0)
     return save_binned_value_map(
@@ -397,7 +398,7 @@ def save_cls_2d_output(
     spec,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
 ) -> Path:
     return save_cls_2d(
         value_sum,
@@ -422,7 +423,7 @@ def draw_cls_2d_for_spec(
     output: Path,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
     plots_2d=KINEMATIC_2D_PLOTS,
 ) -> list[Path]:
     if not has_kinematic_2d_histograms(histograms):
@@ -458,7 +459,7 @@ def draw_run3_cls_2d(
     output: Path,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
     plots_2d=KINEMATIC_2D_PLOTS,
 ) -> list[Path]:
     missing = [spec for spec in specs if not has_kinematic_2d_histograms(histograms_by_spec[spec])]
@@ -501,7 +502,7 @@ def draw_run3_cls_2d(
     return paths
 
 
-def draw_elapsed_time_cls(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_elapsed_time_cls(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}-Run{spec.year}", flush=True)
@@ -538,7 +539,7 @@ def draw_elapsed_time_cls(result_by_key, plot: dict, spec, output: Path, label: 
     return save_figure(fig, output_dir, file_name, ext)
 
 
-def draw_run_cls(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_run_cls(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}-Run{spec.year}", flush=True)
@@ -582,7 +583,7 @@ def plot_rpc(
     run_meta,
     com: float = 13.6,
     label: str = "Preliminary",
-    ext: str = "png",
+    ext: str | Sequence[str] = "png",
     draw_yearly_2d: bool = False,
     draw_roll_maps: bool = False,
     show_excluded_rolls: bool = True,

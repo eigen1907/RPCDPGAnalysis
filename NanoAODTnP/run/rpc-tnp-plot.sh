@@ -31,6 +31,9 @@ Environment overrides:
   DEFAULT_INPUT_BASE          Blacklist-applied merged histogram base
   NO_BLACKLIST_INPUT_BASE     No-blacklist merged histogram base
   PLOT_OUTPUT_BASE            Plot output base directory
+  PLOT_OUTPUT_DIR             Exact output directory; overrides PLOT_OUTPUT_BASE/mode
+  PLOT_FORMATS                Space-separated output formats: png pdf eps (default: png)
+  PLOT_DPI                    Output resolution in DPI (default: 300)
   RUN3_YEARS                  Space-separated year list
   RUN_META_PATH               Run metadata CSV path
   RUN_BLACKLIST_PATH          Run blacklist used for displayed luminosities
@@ -179,12 +182,16 @@ run_plot_campaign() {
     local input_base="$2"
     local output_dir="$3"
     local show_excluded_rolls="$4"
+    local plot_formats=()
+    read -r -a plot_formats <<< "${PLOT_FORMATS:-png}"
+    [[ "${#plot_formats[@]}" -gt 0 ]] || { echo "[error] PLOT_FORMATS must contain at least one output format" >&2; exit 1; }
     local cmd=(
         python3 "${WORK_DIR}/scripts/rpc-tnp-plot.py"
         -o "${output_dir}"
         -g "${GEOM_PATH}"
         --run-meta-path "${RUN_META_PATH}"
     )
+    cmd+=(--ext "${plot_formats[@]}" --dpi "${PLOT_DPI:-300}")
 
     echo "============================================================"
     echo "[plot-campaign] ${label}"
@@ -211,7 +218,6 @@ run_plot_campaign() {
 
     # cmd+=(-s 13.6)
     # cmd+=(-l "Private Work")
-    # cmd+=(--ext pdf)
 
     "${cmd[@]}"
 }
@@ -220,7 +226,7 @@ main() {
     parse_args "$@"
     apply_defaults
 
-    run_plot_campaign "${CAMPAIGN_LABEL}" "${CAMPAIGN_INPUT_BASE}" "${PLOT_OUTPUT_BASE}/${OUTPUT_SUBDIR}" "${SHOW_EXCLUDED_ROLLS}"
+    run_plot_campaign "${CAMPAIGN_LABEL}" "${CAMPAIGN_INPUT_BASE}" "${PLOT_OUTPUT_DIR:-${PLOT_OUTPUT_BASE}/${OUTPUT_SUBDIR}}" "${SHOW_EXCLUDED_ROLLS}"
 }
 
 main "$@"

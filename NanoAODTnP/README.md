@@ -163,6 +163,20 @@ Plot the complete configured Run 3 dataset:
 bash run/rpc-tnp-plot.sh
 ```
 
+Set `PLOT_OUTPUT_DIR` to use an exact output directory instead of the default
+`PLOT_OUTPUT_BASE/<selection>` path. `PLOT_FORMATS` accepts one or more of
+`png`, `pdf`, and `eps`; each figure is saved in all requested formats:
+
+```sh
+PLOT_OUTPUT_DIR="$PWD/plots/publication" \
+PLOT_FORMATS="png eps" PLOT_DPI=600 bash run/rpc-tnp-plot.sh
+```
+
+EPS keeps text, axes, and curves as vectors. Heatmaps are embedded as raster
+images to preserve their transparent bin edges. `PLOT_DPI` controls PNG and
+embedded raster resolution (default: 300). The Python command accepts the same
+settings as `--ext png eps --dpi 600`.
+
 Tight-match plots read `tnp-hist-tight-merged` and write
 `plots/tight-match`. Add `--no-blacklist` to select
 `tnp-hist-tight-wo-blacklist-merged` and `plots/tight-match-no-blacklist`:
@@ -214,7 +228,11 @@ Roll maps mark entries from `data/blacklist/roll/blackListYYYY.txt` with dark ha
 
 ## Luminosity Metadata
 
-Later plotting uses `data/lumi/run3.csv`. The luminosity tools remain independent of the active analysis modules:
+The RPC2026 luminosity snapshot is stored in `data/lumi/RPC2026.csv`. Set
+`RUN_META_PATH="$PWD/data/lumi/RPC2026.csv"` when plotting that campaign from
+the `NanoAODTnP` directory.
+
+By default, plotting uses `data/lumi/run3.csv`. The luminosity tools remain independent of the active analysis modules:
 
 ```sh
 # Refresh per-dataset CRAB reports, golden lumi JSON files, and brilcalc CSV files.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -181,7 +182,7 @@ def save_efficiency_reports(specs, roll_results, run_results, output: Path) -> l
     return paths
 
 
-def draw_efficiency_1d(results, plot: dict, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_efficiency_1d(results, plot: dict, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}", flush=True)
@@ -225,7 +226,7 @@ def draw_efficiency_1d(results, plot: dict, output: Path, label: str, com: float
     return save_figure(fig, output, output_name, ext)
 
 
-def draw_elapsed_time_efficiency(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_elapsed_time_efficiency(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}-Run{spec.year}", flush=True)
@@ -262,7 +263,7 @@ def draw_elapsed_time_efficiency(result_by_key, plot: dict, spec, output: Path, 
     return save_figure(fig, output_dir, file_name, ext)
 
 
-def draw_run_efficiency(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_run_efficiency(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}-Run{spec.year}", flush=True)
@@ -298,7 +299,7 @@ def draw_run_efficiency(result_by_key, plot: dict, spec, output: Path, label: st
     return save_figure(fig, output_dir, file_name, ext)
 
 
-def draw_run_index_efficiency(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_run_index_efficiency(result_by_key, plot: dict, spec, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = plot["output"]
     variant = plot.get("variant")
     print(f"[info] plotting {variant_output_label(output_name, variant)}-Run{spec.year}", flush=True)
@@ -337,7 +338,7 @@ def draw_run_index_efficiency(result_by_key, plot: dict, spec, output: Path, lab
     return save_figure(fig, output_dir, file_name, ext)
 
 
-def draw_nrolls_efficiency(results, region: str, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_nrolls_efficiency(results, region: str, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     output_name = "nrolls-eff"
     print(f"[info] plotting {variant_output_label(output_name, region)}", flush=True)
     combined_spec = combine_dataset_specs([spec for spec, _ in results])
@@ -379,7 +380,7 @@ def save_efficiency_2d(
     spec,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
 ) -> Path:
     efficiency = np.divide(100.0 * passed, total, out=np.full_like(total, np.nan, dtype=np.float64), where=total > 0)
     return save_binned_value_map(
@@ -415,7 +416,7 @@ def save_efficiency_2d_count(
     spec,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
 ) -> Path:
     finite = values[np.isfinite(values) & (values > 0.0)]
     vmax = max(float(np.max(finite)) if len(finite) else 0.0, 1.0)
@@ -453,7 +454,7 @@ def save_efficiency_2d_components(
     spec,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
 ) -> list[Path]:
     denominator_name = output_name.replace("eff-", "denom-", 1)
     numerator_name = output_name.replace("eff-", "numer-", 1)
@@ -480,7 +481,7 @@ def save_efficiency_2d_outputs(
     spec,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
 ) -> list[Path]:
     output_name = plot["output"]
     xlabel = plot["xlabel"]
@@ -525,7 +526,7 @@ def draw_efficiency_2d_for_spec(
     output: Path,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
     plots_2d=KINEMATIC_2D_PLOTS,
 ) -> list[Path]:
     if not has_kinematic_2d_histograms(histograms):
@@ -561,7 +562,7 @@ def draw_run3_efficiency_2d(
     output: Path,
     label: str,
     com: float,
-    ext: str,
+    ext: str | Sequence[str],
     plots_2d=KINEMATIC_2D_PLOTS,
 ) -> list[Path]:
     missing = [spec for spec in specs if not has_kinematic_2d_histograms(histograms_by_spec[spec])]
@@ -612,7 +613,7 @@ def plot_efficiency(
     run_meta,
     com: float = 13.6,
     label: str = "Preliminary",
-    ext: str = "png",
+    ext: str | Sequence[str] = "png",
     draw_yearly_2d: bool = False,
     draw_roll_maps: bool = False,
     show_excluded_rolls: bool = True,

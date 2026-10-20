@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 
@@ -158,14 +159,17 @@ PAIR_2D = [
 ]
 
 
-def draw_count_hist1d(results, plot: dict, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_count_hist1d(results, plot: dict, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     print(f"[info] plotting {plot['output']}", flush=True)
     combined_spec = combine_dataset_specs([spec for spec, _ in results])
     fig, ax = new_figure(label, com, year=cms_year_label(combined_spec.year))
     add_tag_and_probe_label(ax)
     ax.set_xlabel(plot["xlabel"], fontsize=22)
-    ax.set_ylabel(histogram_y_label(plot["ylabel"], plot["edges"], plot.get("unit")), fontsize=22)
-    ax.yaxis.label.set_y(0.94)
+    is_pair_mass = plot["name"] == "pair_mass"
+    ylabel = plot["ylabel"] if is_pair_mass else histogram_y_label(plot["ylabel"], plot["edges"], plot.get("unit"))
+    ax.set_ylabel(ylabel, fontsize=22)
+    if not is_pair_mass:
+        ax.yaxis.label.set_y(0.94)
     ax.set_xlim(float(plot["edges"][0]), float(plot["edges"][-1]))
     max_count = max((float(np.max(result.counts)) for _, result in results if len(result.counts)), default=0.0)
     scale_exp, scale = count_scale(max_count)
@@ -173,7 +177,7 @@ def draw_count_hist1d(results, plot: dict, output: Path, label: str, com: float,
         draw_binned_stairs(ax, result.counts, result.edges, color=year_color(spec.year, idx), label="_nolegend_", scale=scale)
     if max_count > 0.0:
         ax.set_ylim(0.0, plot["y_margin"] * max_count / scale)
-    annotate_count_scale(ax, scale_exp, y=0.965)
+    annotate_count_scale(ax, scale_exp, y=1.0 if is_pair_mass else 0.965)
     draw_year_summary(ax, [
         (year_color(spec.year, idx), build_year_label(spec.year, spec.lumi))
         for idx, (spec, result) in enumerate(results)
@@ -181,7 +185,7 @@ def draw_count_hist1d(results, plot: dict, output: Path, label: str, com: float,
     return save_figure(fig, output, plot["output"], ext)
 
 
-def draw_count_hist2d(results, plot: dict, output: Path, label: str, com: float, ext: str) -> Path:
+def draw_count_hist2d(results, plot: dict, output: Path, label: str, com: float, ext: str | Sequence[str]) -> Path:
     print(f"[info] plotting {plot['output']}", flush=True)
     spec = combine_dataset_specs([spec for spec, _ in results])
     first = results[0][1]
@@ -215,7 +219,7 @@ def plot_pair(
     output: Path,
     com: float = 13.6,
     label: str = "Preliminary",
-    ext: str = "png",
+    ext: str | Sequence[str] = "png",
     probe_pt_minimum: float | None = None,
 ) -> list[Path]:
     plots_1d = with_probe_pt_minimum(PAIR_1D, probe_pt_minimum)
